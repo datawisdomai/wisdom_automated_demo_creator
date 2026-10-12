@@ -8,3 +8,4 @@ __pycache__/
 demos/*/build/
 demos/*/inputs/*.transcript
 *.duckdb
+demos/*/.state.lock
