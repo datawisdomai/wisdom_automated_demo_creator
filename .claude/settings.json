@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(demo:*)",
+      "Bash(.venv/bin/demo:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/bin/pytest:*)",
+      "Bash(uv:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  }
+}

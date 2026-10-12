@@ -1,0 +1,17 @@
+# WisdomAI deployment registry — COMMITTED, non-sensitive.
+# Access keys live in .env as `<tenant>_key` (or the `key_env` named here).
+# NEVER put a key in this file.
+#
+#     Client.for_deployment("proddemo")
+
+[deployments.proddemo]
+tenant = "proddemo"                 # -> https://proddemo.askwisdom.ai/graphql
+description = "Internal demo deployment (not a customer)"
+workspace_id = "ET_WORKSPACE_F01MFB"   # "Certified Demos" — automated demos are published here
+workspace_name = "Certified Demos"
+
+[deployments.gowisdomstaging]
+tenant = "gowisdomstaging"          # key env name only; host overrides the askwisdom.ai URL
+host = "staging.gowisdom.ai"        # -> https://staging.gowisdom.ai/graphql
+key_env = "staging.gowisdom_key"    # the var name used in .env (note the dot)
+description = "gowisdom.ai STAGING — optional, for testing publish flows away from proddemo"

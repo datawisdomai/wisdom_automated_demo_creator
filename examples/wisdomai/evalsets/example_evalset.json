@@ -1,0 +1,15 @@
+{
+  "name": "Smoke eval — basic counts",
+  "items": [
+    {
+      "prompt": "How many rows are in the users table?",
+      "sql": ["SELECT COUNT(*) FROM users"]
+    },
+    {
+      "prompt": "How many unique accounts signed up last month?",
+      "sql": [
+        "SELECT COUNT(DISTINCT account_id) FROM users WHERE signed_up_at >= date_trunc('month', current_date - interval '1 month') AND signed_up_at < date_trunc('month', current_date)"
+      ]
+    }
+  ]
+}

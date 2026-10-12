@@ -1,0 +1,133 @@
+name: halcyon
+title: Halcyon Specialty Distribution
+vertical: Healthcare Provider
+built_for: McKesson / Tiger Analytics conversation (no prospect names appear in the data)
+as_of: 2026-09-25
+data_start: 2025-01-01
+seed: 20260925
+
+persona:
+  primary: Director of Customer Supply Operations
+  secondary: [Regional DC operations manager, Contracts and Chargebacks analyst, Strategic account manager]
+  kpis: [line fill rate, OTIF, backorder aging, cold chain integrity, expiry write-offs, chargeback recovery, retention of contracted customers]
+
+snowflake:
+  database: HALCYON_POC
+  schema: SPECIALTY_OPS
+  ddl: 01_snowflake_ddl.sql
+  load_order: [CALENDAR, DISTRIBUTION_CENTERS, MANUFACTURERS, GPOS, PRODUCTS, CUSTOMERS, CUSTOMER_SITES, CONTRACT_PRICES,
+               ORDERS, ORDER_LINES, SHIPMENTS, COLD_CHAIN_EVENTS, BACKORDERS, INVENTORY_SNAPSHOTS, CUSTOMER_ALLOCATIONS,
+               RETURNS, CHARGEBACKS, SERVICE_CASES, DATA_DICTIONARY]
+  views: [V_ORDER_LINE_DETAIL, V_FILL_RATE_CUSTOMER_MONTH, V_CUSTOMER_HEALTH, V_DC_SERVICE_PERFORMANCE, V_INVENTORY_RISK,
+          V_ALLOCATION_UTILIZATION, V_COLD_CHAIN_EXCURSIONS, V_CHARGEBACK_SUMMARY, V_BACKORDER_AGING]
+  expected_rows:
+    CALENDAR: 730
+    DISTRIBUTION_CENTERS: 6
+    MANUFACTURERS: 22
+    GPOS: 8
+    PRODUCTS: 180
+    CUSTOMERS: 120
+    CUSTOMER_SITES: 736
+    CONTRACT_PRICES: 978
+    ORDERS: 45357
+    ORDER_LINES: 162201
+    SHIPMENTS: 45318
+    COLD_CHAIN_EVENTS: 129968
+    BACKORDERS: 3682
+    INVENTORY_SNAPSHOTS: 97200
+    CUSTOMER_ALLOCATIONS: 5738
+    RETURNS: 3312
+    CHARGEBACKS: 101580
+    SERVICE_CASES: 1419
+    DATA_DICTIONARY: 22
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    HERO_CUSTOMER: CUST-0001
+    SQUEEZED_CUSTOMERS: [CUST-0001, CUST-0007, CUST-0003]
+    VANTERRA_NDC: 61234-0101-04
+    ONCARYL_NDC: 58771-0410-01
+    VANTERRA_CUT_MONTH: 2026-06-01
+    VANTERRA_CUT2_MONTH: 2026-08-01
+    MEM_GELPACK_START: 2026-06-01
+    KELDON_PRICE_FILE_DATE: 2026-04-15
+    BAYVIEW_LEAKAGE_START: 2026-07-27
+    ONCARYL_DEMAND_DROP_START: 2026-05-01
+
+control_points:
+  - id: CP1
+    name: Vanterra (GLP-1) allocation squeeze hits Bayview Regional Health
+    hero: Bayview Regional Health
+    targets:
+      - {metric: bayview_fill_rate_drop_pts, op: ">=", value: 0.08}
+      - {metric: bayview_open_backorders_over_14d, op: ">=", value: 3}
+      - {metric: vanterra_allocation_cut_may_to_aug, op: ">=", value: 0.20}
+      - {metric: bayview_non_glp1_value_change, op: "<=", value: -0.10}
+  - id: CP2
+    name: Memphis cold chain excursion cluster (GEL_PACK_STD)
+    targets:
+      - {metric: dc_mem_excursion_rate_vs_next_dc, op: ">=", value: 3}
+      - {metric: dc_mem_quarantined_value_since_june, op: ">=", value: 800000}
+  - id: CP3
+    name: Oncaryl short-dated inventory at Dallas
+    targets:
+      - {metric: dal_oncaryl_expiring_90d_value, op: ">=", value: 1500000}
+  - id: CP4
+    name: Keldon Pharma chargeback disputes after the 2026-04A price file
+    targets:
+      - {metric: keldon_dispute_rate_since_may, op: ">=", value: 0.18}
+      - {metric: keldon_disputed_amount_since_may, op: ">=", value: 1200000}
+  - id: CP5
+    name: Backorders over 14 days drive HIGH/CRITICAL service cases
+  - id: CP6
+    name: AUTO_REPLENISH sites fill better and raise fewer STAT orders
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+documents: []
+
+live_app:
+  name: Customer Supply Rescue Workbench
+  prompt: live_app_prompt.md
+  tabs: [Case Queue, Scenario Lab, Implementation]
+
+chat:
+  followup_question: Which contracted customers renewing in the next 120 days show deteriorating service, and for the top one, what is driving it and how much of the drop is the Vanterra allocation versus everything else?
+  expected_points:
+    - Bayview Regional Health is the top customer in the renewal window
+    - line fill fell about 9 points recent 8 weeks vs prior 8 weeks
+    - Vanterra allocation shortfall is the main driver
+    - aged backorders and open high severity cases are rising
+    - non-allocated order value is down about 18 percent
+
+agent:
+  name: Customer Supply Risk Monitor
+  prompt: agent_prompt.md
+  enabled: false
+
+wisdom:
+  deployment: proddemo
+  workspace_id: ET_WORKSPACE_F01MFB
+  connection: {name: Certified Demos Snowflake}
+  domain_name: Halcyon Specialty Distribution
+  domain_description: Fictional US specialty pharmaceutical distributor. Demo today is 2026-09-25; data spans 2025-01-01 to 2026-09-25. Snowflake HALCYON_POC.SPECIALTY_OPS.
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by: Chick Chetwynd
+  lookup_columns: [CUSTOMERS.CUSTOMER_NAME, PRODUCTS.PRODUCT_NAME, MANUFACTURERS.MANUFACTURER_NAME, DISTRIBUTION_CENTERS.DC_NAME, CUSTOMERS.ACCOUNT_MANAGER]
+  eval:
+    name: Halcyon reviewed queries
+    run_count: 1
+    experimental_mode: EXPERIMENTAL_MODE_NONE
+    pass_threshold: 0.9
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md

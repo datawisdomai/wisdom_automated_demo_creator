@@ -1,0 +1,131 @@
+{
+  "snowflake": {
+    "database": "HALCYON_POC",
+    "schema": "SPECIALTY_OPS"
+  },
+  "steps": {
+    "ddl": {
+      "at": "2026-10-12T21:42:10+00:00",
+      "seconds": 17,
+      "statements": 35,
+      "status": "ok"
+    },
+    "docs": {
+      "at": "2026-10-12T21:47:12+00:00",
+      "rendered": 0,
+      "status": "ok"
+    },
+    "generate": {
+      "at": "2026-10-12T21:38:40+00:00",
+      "counts": {
+        "BACKORDERS": 3682,
+        "CALENDAR": 730,
+        "CHARGEBACKS": 101580,
+        "COLD_CHAIN_EVENTS": 129968,
+        "CONTRACT_PRICES": 978,
+        "CUSTOMERS": 120,
+        "CUSTOMER_ALLOCATIONS": 5738,
+        "CUSTOMER_SITES": 736,
+        "DATA_DICTIONARY": 22,
+        "DISTRIBUTION_CENTERS": 6,
+        "GPOS": 8,
+        "INVENTORY_SNAPSHOTS": 97200,
+        "MANUFACTURERS": 22,
+        "ORDERS": 45357,
+        "ORDER_LINES": 162201,
+        "PRODUCTS": 180,
+        "RETURNS": 3312,
+        "SERVICE_CASES": 1419,
+        "SHIPMENTS": 45318
+      },
+      "mismatches": [],
+      "missing": [],
+      "schema_errors": [],
+      "seconds": 16,
+      "status": "ok"
+    },
+    "load": {
+      "at": "2026-10-12T21:43:16+00:00",
+      "counts": {
+        "BACKORDERS": 3682,
+        "CALENDAR": 730,
+        "CHARGEBACKS": 101580,
+        "COLD_CHAIN_EVENTS": 129968,
+        "CONTRACT_PRICES": 978,
+        "CUSTOMERS": 120,
+        "CUSTOMER_ALLOCATIONS": 5738,
+        "CUSTOMER_SITES": 736,
+        "DATA_DICTIONARY": 22,
+        "DISTRIBUTION_CENTERS": 6,
+        "GPOS": 8,
+        "INVENTORY_SNAPSHOTS": 97200,
+        "MANUFACTURERS": 22,
+        "ORDERS": 45357,
+        "ORDER_LINES": 162201,
+        "PRODUCTS": 180,
+        "RETURNS": 3312,
+        "SERVICE_CASES": 1419,
+        "SHIPMENTS": 45318
+      },
+      "failures": [],
+      "seconds": 62,
+      "status": "ok",
+      "tables": [
+        "CALENDAR",
+        "DISTRIBUTION_CENTERS",
+        "MANUFACTURERS",
+        "GPOS",
+        "PRODUCTS",
+        "CUSTOMERS",
+        "CUSTOMER_SITES",
+        "CONTRACT_PRICES",
+        "ORDERS",
+        "ORDER_LINES",
+        "SHIPMENTS",
+        "COLD_CHAIN_EVENTS",
+        "BACKORDERS",
+        "INVENTORY_SNAPSHOTS",
+        "CUSTOMER_ALLOCATIONS",
+        "RETURNS",
+        "CHARGEBACKS",
+        "SERVICE_CASES",
+        "DATA_DICTIONARY"
+      ]
+    },
+    "metrics_check": {
+      "at": "2026-10-12T21:55:23+00:00",
+      "count": 34,
+      "failures": [],
+      "status": "ok"
+    },
+    "rq_check": {
+      "at": "2026-10-12T21:39:58+00:00",
+      "count": 57,
+      "failures": 0,
+      "status": "ok"
+    },
+    "rq_check_snowflake": {
+      "at": "2026-10-12T21:44:29+00:00",
+      "count": 57,
+      "failures": 0,
+      "status": "ok"
+    },
+    "validate": {
+      "at": "2026-10-12T21:39:57+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 111,
+      "status": "ok"
+    },
+    "validate_snowflake": {
+      "at": "2026-10-12T21:43:58+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 111,
+      "status": "ok"
+    }
+  },
+  "wisdom": {
+    "connection_id": "et-connection-f9d17328a7924e8590d1132c0273cded"
+  }
+}

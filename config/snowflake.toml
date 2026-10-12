@@ -1,0 +1,7 @@
+# Snowflake environment shared by every demo — COMMITTED, non-sensitive.
+# Your own user + PAT go in .env (SNOWFLAKE_USER, SNOWFLAKE_PAT).
+account = "XMSPMYE-PAB51256"      # ORGNAME-ACCOUNTNAME of the WisdomAI SE shared account
+warehouse = "COMPUTE_WH"
+ddl_role = "SYSADMIN"                 # role used to CREATE DATABASE / load data (your PAT must allow it)
+read_role = "WISDOMAI_READ_ONLY"      # role the Wisdom connection uses; grants are generated per demo
+connection_name = "Certified Demos Snowflake"   # name of the Wisdom connection in the target workspace
