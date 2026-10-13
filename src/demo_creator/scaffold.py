@@ -40,6 +40,7 @@ questions:
   opening_questions: 3
 
 documents: []           # - {{spec: docs/<file>.md, kind: contract|report|memo}}
+context_assets: []      # - {{spec: docs/<file>.md, kind: standard|glossary|wiki|chat_export|memo}} — authored assets for the context extractor
 
 live_app:
   name:
@@ -67,7 +68,9 @@ wisdom:
   metrics_csv: metrics.csv
   reviewed_by:
   lookup_columns: []
-  eval: {{run_count: 1, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}}
+  eval: {{run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}}
+  context_mode: extractor   # all context goes through the context extractor (dbt semantic yaml, query library, handbook + context_assets[])
+  extraction: {{accept: [knowledge, synonyms, metrics, reviewed_queries], coverage_threshold: 0.9}}
 
 script:
   template: docs/templates/demo_script_example.md

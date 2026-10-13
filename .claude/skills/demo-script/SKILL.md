@@ -15,6 +15,9 @@ Write `demos/<demo>/DEMO_SCRIPT.md` with exactly these parts:
 2. **Prepare ahead of time** — the Live App open with its original prompt visible in the side bar;
    the three tabs by their real names; the chat with the follow-up question already answered (quote
    the exact question); the agent open in the visualizer with its prompt showing, not saved or run.
+   **Every item carries its clickable URL** taken from the `## Links` block of `DEMO_REPORT.md`
+   (run `demo report <demo>` first if it is missing): Live App, follow-up chat, agent, domain and
+   Domain Health. The user always needs the links, never bare ids.
 3. **Script** — ~600–750 words: the persona's never-ending priority in one line; `{Executive
    Overview tab}` what the KPIs and the trade-off chart show, naming the hero arc's numbers; `{Scenario
    Lab tab}` three what-if questions the controls answer, the three side-by-side scenarios; `{Implementation

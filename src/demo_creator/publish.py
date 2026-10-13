@@ -1,5 +1,12 @@
-"""Publish a demo into Wisdom: connection → domain → database → knowledge →
-metrics → reviewed queries → lookup columns → instructions → documents.
+"""Publish a demo into Wisdom: connection → domain → database → instructions →
+lookup columns → documents → context extraction.
+
+Context (knowledge, metrics, reviewed queries, synonyms, descriptions) reaches the domain
+ONLY through the context extractor in `context_mode: extractor` (the default): the local
+definitions are rendered into realistic assets (dbt semantic layer, certified query
+library, analyst handbook) and uploaded next to the authored context_assets[]; the run's
+suggestions are accepted by family and the result is read back as coverage. The direct
+CSV / API steps (knowledge, metrics, reviewed_queries) only run in `context_mode: direct`.
 
 Every step is idempotent (reads back what exists first) and records ids in
 `.state.json`. Without `apply=True` the publisher only reads and prints the plan.
@@ -10,6 +17,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from wisdomai import Client, GraphQLError
 
@@ -32,14 +40,28 @@ class StepReport:
     data: dict = field(default_factory=dict)
 
 
+def _digest(path) -> str:
+    import hashlib
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:16]
+
+
 class Publisher:
     def __init__(self, spec: DemoSpec, state: State, client: Client, *, apply: bool = False, echo: bool = True):
         self.spec, self.state, self.client, self.apply, self.echo = spec, state, client, apply, echo
+        self.registry: Registry | None = None
         self.dep = config.wisdom_deployment(spec.wisdom.deployment)
         self.sf = config.snowflake_config()
         self.workspace_id = spec.wisdom.workspace_id or self.dep.workspace_id
         if not self.workspace_id:
             raise PublishError("no workspace_id in demo.yaml or config/deployments.toml")
+        # demo.yaml may point at a different workspace than the deployment default: label it honestly
+        self.workspace_label = self.dep.workspace_name if self.workspace_id == self.dep.workspace_id else None
+        if self.workspace_label is None:
+            try:
+                self.workspace_label = next((w["name"] for w in client.workspaces() if w["id"] == self.workspace_id), None)
+            except Exception:  # noqa: BLE001
+                self.workspace_label = None
+        self.workspace_label = self.workspace_label or self.workspace_id
         self.reports: list[StepReport] = []
 
     # ---- plumbing ----
@@ -56,7 +78,7 @@ class Publisher:
         return r
 
     def _announce(self, op: str, effect: str) -> None:
-        self._say(f"  -> {op}: {effect}  [{self.dep.name} / {self.dep.workspace_name or self.workspace_id}]")
+        self._say(f"  -> {op}: {effect}  [{self.dep.name} / {self.workspace_label}]")
 
     @property
     def domain_id(self) -> str | None:
@@ -251,7 +273,14 @@ class Publisher:
                 entries.append({"description": text}); seen.add(text)
         return entries
 
+    def _extractor_only(self, step: str) -> StepReport | None:
+        if self.spec.wisdom.context_mode == "extractor":
+            return self._report(step, "skipped", f"context_mode is extractor — {step} reaches the domain only through the context extractor (see the extraction step)")
+        return None
+
     def sync_knowledge(self) -> StepReport:
+        if (skip := self._extractor_only("knowledge")):
+            return skip
         entries = self.knowledge_entries()
         if not self.domain_id:
             return self._report("knowledge", "planned", f"would add {len(entries)} entries once the domain exists")
@@ -269,6 +298,8 @@ class Publisher:
 
     # ---- 5. reviewed queries ----
     def sync_reviewed_queries(self, registry: Registry) -> StepReport:
+        if (skip := self._extractor_only("reviewed_queries")):
+            return skip
         items = to_api_items(registry, self.spec.wisdom.dialect)
         if not self.domain_id:
             return self._report("reviewed_queries", "planned", f"would add {len(items)} reviewed queries once the domain exists")
@@ -289,6 +320,8 @@ class Publisher:
 
     # ---- 6. metrics ----
     def sync_metrics(self) -> StepReport:
+        if (skip := self._extractor_only("metrics")):
+            return skip
         metrics = read_metrics_csv(self.spec.metrics_path)
         if not self.domain_id:
             return self._report("metrics", "planned", f"would create {len(metrics)} metrics once the domain exists")
@@ -311,6 +344,9 @@ class Publisher:
                 created.append(m.name)
             except GraphQLError as exc:
                 failed.append({"name": m.name, "error": str(exc)[:300]})
+            except Exception as exc:  # noqa: BLE001 — e.g. a transient HTTP read timeout on validateMetric; keep going, retry on the next run
+                failed.append({"name": m.name, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+                self._say(f"  metric {m.name}: {type(exc).__name__} — skipped, re-run publish --only metrics to retry")
         after = len(self.client.list_metrics(self.domain_id))
         self.state.set("wisdom", "metric_names", sorted(set(self.state.wisdom.get("metric_names") or []) | set(created)))
         status = "ok" if not failed else "failed"
@@ -398,12 +434,140 @@ class Publisher:
         self.state.set("wisdom", "uploaded_documents", sorted(done | {p.name for p in todo}))
         return self._report("documents", "ok" if res["ok"] else "failed", f"uploaded {len(todo)} files to dataset {res['dataset_id']}", uploaded=len(todo), dataset_id=res["dataset_id"])
 
+    # ---- 10. context extraction (the only way context enters the domain in extractor mode) ----
+    def extract_context_assets(self, *, wait_s: int = 1500) -> StepReport:
+        from .context_assets import ACCEPT_DEFAULT, ALL_AGENTS, accept_suggestions, coverage, extraction_files
+
+        files = extraction_files(self.spec, self.registry)
+        if not files:
+            return self._report("extraction", "ok", "nothing to extract (no metrics, reviewed queries, knowledge or context_assets[])", uploaded=0)
+        missing_pdfs = [f.path.name for f in files if not f.path.is_file()]
+        if missing_pdfs:
+            return self._report("extraction", "failed", f"{missing_pdfs} not rendered — run `demo docs` first")
+        if not self.domain_id:
+            return self._report("extraction", "planned", f"would upload {len(files)} files for context extraction once the domain exists: {[f.path.name for f in files]}")
+        attached = (self.client.context_extraction_connections(self.domain_id) or {}).get("contextExtractionConnectionIds") or []
+        if "files" not in attached:
+            self._announce("attachContextExtractionConnection", "attach the uploaded-files source ('files') to the domain for context extraction")
+            if not self.apply:
+                return self._report("extraction", "planned", f"would attach the 'files' source, upload {len(files)} files and trigger extraction")
+            self.client.attach_context_extraction_connection(self.domain_id, "files", acceptance="DO_NOT_AUTO_ACCEPT", auto_extract=False)
+            attached = (self.client.context_extraction_connections(self.domain_id) or {}).get("contextExtractionConnectionIds") or []
+            if "files" not in attached:
+                return self._report("extraction", "failed", f"'files' source not attached after attachContextExtractionConnection (have {attached})")
+        already = {f["fileName"]: f for f in self.client.context_extraction_uploaded_files(self.domain_id, "files")}
+        # generated assets are re-uploaded when their content changed (replace the stored copy); authored PDFs once
+        todo = []
+        for f in files:
+            if f.path.name not in already:
+                todo.append(f)
+            elif f.generated and self.state.wisdom.get("extraction_uploaded", {}).get(f.path.name) != _digest(f.path):
+                todo.append(f)
+        if todo:
+            self._announce("registerContextExtractionUploadedFiles", f"upload {len(todo)} files to the context extractor: {[f.path.name for f in todo]}")
+            if not self.apply:
+                return self._report("extraction", "planned", f"would upload {[f.path.name for f in todo]} and trigger extraction")
+            for f in todo:
+                if f.path.name in already:
+                    self.client.delete_context_extraction_uploaded_file(self.domain_id, already[f.path.name]["sourceFileId"])
+                self.client.upload_context_documents(self.domain_id, [f.path], instructions=f.instructions, acceptance="DO_NOT_AUTO_ACCEPT")
+                self.state.set("wisdom", "extraction_uploaded", {**(self.state.wisdom.get("extraction_uploaded") or {}), f.path.name: _digest(f.path)})
+            after = {f["fileName"] for f in self.client.context_extraction_uploaded_files(self.domain_id, "files")}
+            missing = [f.path.name for f in todo if f.path.name not in after]
+            if missing:
+                return self._report("extraction", "failed", f"uploaded files not registered: {missing}")
+        run_id = self.state.wisdom.get("extraction_run_id")
+        if run_id and not todo:
+            status = self._extraction_status(run_id)
+            if status and "RUNNING" in status:
+                self._say(f"  extraction {run_id} still running — waiting")
+                rep = self._wait_extraction(run_id, wait_s, uploaded=0)
+                return self._finish_extraction(rep) if rep.status == "ok" else rep
+            if status and "SUCCESS" in status and self.state.wisdom.get("extraction_coverage"):
+                return self._report("extraction", "ok", f"extraction run {run_id} already {status}", uploaded=0, run_id=run_id, job_status=status,
+                                    coverage=self.state.wisdom.get("extraction_coverage"))
+        self._announce("triggerKnowledgeExtraction", f"extract {ALL_AGENTS} from {len(files)} uploaded files")
+        if not self.apply:
+            return self._report("extraction", "planned", "would trigger extraction")
+        rep = self._trigger_and_wait([f.path.name for f in files], wait_s, uploaded=len(todo))
+        return self._finish_extraction(rep) if rep.status == "ok" else rep
+
+    def _trigger_and_wait(self, file_names: list[str], wait_s: int, *, uploaded: int, force_full: bool | None = None) -> StepReport:
+        from .context_assets import ALL_AGENTS
+
+        before = {r["jobRun"]["jobRunId"] for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50)}
+        self.client.trigger_knowledge_extraction(self.domain_id, "files", file_names, agent_types=ALL_AGENTS, force_full=force_full)
+        run_id = None
+        deadline = time.time() + 180
+        while run_id is None and time.time() < deadline:
+            new = [r for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50) if r["jobRun"]["jobRunId"] not in before]
+            if new:
+                run_id = new[0]["jobRun"]["jobRunId"]
+                self.state.set("wisdom", "extraction_run_id", run_id)
+                break
+            time.sleep(10)
+        if run_id is None:
+            return self._report("extraction", "failed", "extraction run did not appear within 180s of the trigger")
+        return self._wait_extraction(run_id, wait_s, uploaded=uploaded)
+
+    def _finish_extraction(self, rep: StepReport) -> StepReport:
+        """Accept the configured suggestion families, read back coverage, retry once with a
+        full re-extraction when coverage is short, then report — never fall back to CSV."""
+        from .context_assets import ACCEPT_DEFAULT, accept_suggestions, coverage, extraction_files
+
+        families = list(self.spec.wisdom.extraction.get("accept") or ACCEPT_DEFAULT)
+        threshold = float(self.spec.wisdom.extraction.get("coverage_threshold", 0.9))
+        acc = accept_suggestions(self.client, self.domain_id, families)
+        self._say(f"  accepted {acc['accepted']} suggestions ({acc['by_family']}); {acc['left_pending']} left pending for steward review")
+        cov = coverage(self.client, self.domain_id, self.spec, self.registry)
+        short = [k for k in ("metrics", "reviewed_queries") if cov[k]["expected"] and cov[k]["coverage"] < threshold]
+        if short and not self.state.wisdom.get("extraction_retried"):
+            self._say(f"  coverage short on {short} ({ {k: cov[k]['coverage'] for k in short} }) — one full re-extraction")
+            self.state.set("wisdom", "extraction_retried", True)
+            rep2 = self._trigger_and_wait([f.path.name for f in extraction_files(self.spec, self.registry)], 1500, uploaded=0, force_full=True)
+            if rep2.status != "ok":
+                return rep2
+            acc2 = accept_suggestions(self.client, self.domain_id, families)
+            acc["accepted"] += acc2["accepted"]
+            cov = coverage(self.client, self.domain_id, self.spec, self.registry)
+            short = [k for k in ("metrics", "reviewed_queries") if cov[k]["expected"] and cov[k]["coverage"] < threshold]
+        self.state.set("wisdom", "extraction_coverage", cov)
+        summary = (f"metrics {cov['metrics']['found']}/{cov['metrics']['expected']}, reviewed queries {cov['reviewed_queries']['found']}/{cov['reviewed_queries']['expected']}, "
+                   f"knowledge {cov['knowledge']['in_domain']} entries; accepted {acc['accepted']}, {acc['left_pending']} pending for review")
+        status = "ok" if not short else "failed"
+        detail = summary if not short else (summary + f" — coverage below {threshold:.0%} on {short}; missing: "
+                                            + "; ".join(f"{k}: {cov[k]['missing'][:8]}" for k in short))
+        return self._report("extraction", status, detail, run_id=rep.data.get("run_id"), job_status=rep.data.get("job_status"),
+                            accepted=acc, coverage=cov, uploaded=rep.data.get("uploaded"))
+
+    def _wait_extraction(self, run_id: str, wait_s: int, *, uploaded: int) -> StepReport:
+        deadline = time.time() + wait_s
+        status = None
+        while time.time() < deadline:
+            run = next((r for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50) if r["jobRun"]["jobRunId"] == run_id), None)
+            status = (run or {}).get("jobRun", {}).get("status")
+            if status and ("SUCCESS" in status or "FAIL" in status or "ERROR" in status or "CANCEL" in status):
+                break
+            if run:
+                self._say(f"  extraction {run_id}: {status} ({run.get('filesCompletedCount')}/{run.get('filesTotalCount')} files)")
+            time.sleep(20)
+        ok = bool(status and "SUCCESS" in status)
+        return self._report("extraction", "ok" if ok else ("running" if status and "RUNNING" in status else "failed"),
+                            f"run {run_id} {status}", uploaded=uploaded, run_id=run_id, job_status=status)
+
+    def _extraction_status(self, run_id: str) -> str | None:
+        for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50):
+            if r["jobRun"]["jobRunId"] == run_id:
+                return r["jobRun"]["status"]
+        return None
+
     # ---- orchestration ----
     def run(self, registry: Registry, *, steps: list[str] | None = None) -> list[StepReport]:
+        self.registry = registry
         order = [("connection", self.ensure_connection), ("domain", self.ensure_domain), ("database", self.attach_database),
                  ("instructions", self.sync_instructions), ("knowledge", self.sync_knowledge), ("metrics", self.sync_metrics),
                  ("reviewed_queries", lambda: self.sync_reviewed_queries(registry)), ("lookup", self.sync_lookup_columns),
-                 ("documents", self.upload_documents)]
+                 ("documents", self.upload_documents), ("extraction", self.extract_context_assets)]
         for name, fn in order:
             if steps and name not in steps:
                 continue

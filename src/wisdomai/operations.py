@@ -884,6 +884,12 @@ mutation RegisterContextExtractionUploadedFiles($input: RegisterContextExtractio
 }
 """
 
+ATTACH_CONTEXT_EXTRACTION_CONNECTION = """
+mutation AttachContextExtractionConnection($domainId: ID!, $connectionId: ID!, $acceptanceStrategy: AcceptanceStrategy, $autoExtractEnabled: Boolean) {
+  attachContextExtractionConnection(domainId: $domainId, connectionId: $connectionId, acceptanceStrategy: $acceptanceStrategy, autoExtractEnabled: $autoExtractEnabled) { __typename }
+}
+"""
+
 TRIGGER_KNOWLEDGE_EXTRACTION = """
 mutation TriggerKnowledgeExtraction($input: TriggerKnowledgeExtractionInput!) {
   triggerKnowledgeExtraction(input: $input) { __typename }

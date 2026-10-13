@@ -336,8 +336,9 @@ def cmd_docs(args) -> int:
     spec = _spec(args)
     state = State.load(spec.dir)
     spec.paths.ensure()
-    if not spec.documents:
-        _emit(args, {"ok": True, "rendered": []}, "No documents[] in demo.yaml — nothing to render.")
+    from .documents import context_assets
+    if not spec.documents and not context_assets(spec):
+        _emit(args, {"ok": True, "rendered": []}, "No documents[] or context_assets[] in demo.yaml — nothing to render.")
         state.mark("docs", "ok", rendered=0)
         return 0
     results = render_all(spec, echo=not args.json)
@@ -363,7 +364,7 @@ def cmd_publish(args) -> int:
     except PublishError as exc:
         _die(args, str(exc), code=2)
     if not args.json:
-        print(f"{'APPLY' if args.apply else 'DRY RUN'} — publishing '{spec.wisdom.domain_name}' to {spec.wisdom.deployment} / {pub.dep.workspace_name or pub.workspace_id}")
+        print(f"{'APPLY' if args.apply else 'DRY RUN'} — publishing '{spec.wisdom.domain_name}' to {spec.wisdom.deployment} / {pub.workspace_label}")
     reports = pub.run(registry, steps=args.only or None)
     failed = [r for r in reports if r.status == "failed"]
     payload = {"ok": not failed, "apply": args.apply, "domain_id": pub.domain_id, "steps": [r.__dict__ for r in reports]}
@@ -388,12 +389,21 @@ def cmd_eval(args) -> int:
     else:
         eval_set_id = ensure_eval_set(client, spec, state, registry)
         if not args.json:
-            print(f"Eval set {eval_set_id} with {len(registry)} prompts — running (this takes a few minutes)...")
+            from .evals import run_count_for
+            print(f"Eval set {eval_set_id} with {len(registry)} prompts — running {run_count_for(spec)} times (this takes a while)...")
         report = run_and_wait(client, spec, state, eval_set_id, registry, timeout_s=args.timeout)
     # The eval is a REPORT, not a gate: a completed run is success whatever the score.
     ok = report.score is not None
-    state.mark("eval", "ok" if ok else "failed", score=report.score, total=report.total, passed=report.passed, run_id=report.run_id)
-    lines = [f"score {report.score if report.score is not None else '?'} — {report.passed}/{report.total} prompts matched; run {report.run_id}"]
+    state.mark("eval", "ok" if ok else "failed", score=report.score, total=report.total, passed=report.passed, run_id=report.run_id,
+               run_group_id=report.run_group_id, run_ids=report.run_ids, run_scores=report.run_scores,
+               consistently_passing=report.consistently_passing, consistently_failing=report.consistently_failing, flaky=report.flaky)
+    per_run = ", ".join(f"{x:.3f}" for x in report.run_scores) if report.run_scores else "?"
+    lines = [f"mean score {report.score:.3f} over {len(report.run_ids) or 1} run(s) [{per_run}] — latest run {report.passed}/{report.total} prompts matched; group {report.run_group_id or report.run_id}"
+             if report.score is not None else f"score ? — run {report.run_id}"]
+    if report.consistently_passing is not None:
+        lines.append(f"  consistency: {report.consistently_passing} always pass, {report.consistently_failing} always fail, {report.flaky} flaky")
+    for f in report.flaky_prompts[:15]:
+        lines.append(f"  ~ flaky {f['pass_count']}/{f['total_runs']}: {f['prompt']}")
     for f in report.failed_prompts[:25]:
         lines.append(f"  - [{f['soft_score']}] {f['prompt']}" + (f" — ERROR {str(f['generated_error'])[:120]}" if f['generated_error'] else "") + (f"\n      {f['feedback'][:200]}" if f['feedback'] else ""))
     lines.append("EVAL COMPLETE (results in build/eval_results.json)" if ok else "EVAL DID NOT COMPLETE")
@@ -524,7 +534,8 @@ def cmd_app(args) -> int:
 
 # ---------------------------------------------------------------- health
 def cmd_health(args) -> int:
-    """Trigger a Domain Health analysis run (report-only: nothing acts on its suggestions)."""
+    """Trigger a Domain Health analysis run and LEAVE IT RUNNING: it is the final step of every build so an
+    SE can demo the suggestions it produces in the Domain Health tab. Nothing in the pipeline acts on them."""
     spec = _spec(args)
     state = State.load(spec.dir)
     domain_id = _need_domain(args, state)
@@ -537,7 +548,7 @@ def cmd_health(args) -> int:
     ok = code in (None, "OK", "SUCCESS") or bool(res.get("jobRunId")) or bool(res.get("alreadyQueued"))
     state.set("wisdom", "health_job_run_id", res.get("jobRunId"))
     state.mark("health", "ok" if ok else "failed", job_run_id=res.get("jobRunId"), already_queued=res.get("alreadyQueued"), code=code)
-    _emit(args, {"ok": ok, **res}, f"Domain Health analysis {'already queued' if res.get('alreadyQueued') else 'queued'} (job {res.get('jobRunId')}); review it in the domain's Domain Health tab — nothing here acts on its suggestions.")
+    _emit(args, {"ok": ok, **res}, f"Domain Health analysis {'already queued' if res.get('alreadyQueued') else 'queued'} (job {res.get('jobRunId')}); left running — the SE demos its suggestions from the domain's Domain Health tab; nothing here acts on them.")
     return 0 if ok else 1
 
 
@@ -601,7 +612,7 @@ def cmd_report(args) -> int:
 
 
 ALL_STEPS = ["generate", "validate", "ddl", "load", "validate_snowflake", "rq_check_snowflake", "metrics_check", "docs",
-             "publish", "eval", "health", "app", "chat", "agent", "report"]
+             "publish", "eval", "app", "chat", "agent", "report", "health"]   # health LAST: left running for the SE to demo its suggestions
 
 
 def cmd_all(args) -> int:
@@ -619,11 +630,11 @@ def cmd_all(args) -> int:
         ("docs", ["docs", spec.name]),
         ("publish", ["publish", spec.name, "--apply"]),
         ("eval", ["eval", spec.name]),
-        ("health", ["health", spec.name, "--apply"]),
         ("app", ["app", spec.name, "--apply"]),
         ("chat", ["chat", spec.name, "--apply"]),
         ("agent", ["agent", spec.name, "--apply"]),
         ("report", ["report", spec.name]),
+        ("health", ["health", spec.name, "--apply"]),   # always the final step; the analysis stays queued/running for the SE
     ]
     if not args.apply:
         _emit(args, {"ok": True, "dry_run": True, "steps": [p[0] for p in plan]},
@@ -726,8 +737,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("docs", cmd_docs, "render documents[] markdown specs to build/docs/*.pdf")
     pb = add("publish", cmd_publish, "create/update the Wisdom domain: connection, database, knowledge, reviewed queries (dry-run without --apply)")
     pb.add_argument("--apply", action="store_true")
-    pb.add_argument("--only", nargs="*", help="run only these steps: connection domain database instructions knowledge metrics reviewed_queries lookup documents")
-    ev = add("eval", cmd_eval, "build the eval set from the reviewed queries, run it once, report the score")
+    pb.add_argument("--only", nargs="*", help="run only these steps: connection domain database instructions knowledge metrics reviewed_queries lookup documents extraction")
+    ev = add("eval", cmd_eval, "build the eval set from the reviewed queries, run it at least 3 times, report the mean score and flaky prompts")
     ev.add_argument("--timeout", type=int, default=1200)
     ev.add_argument("--report-last", action="store_true", help="report the last completed run instead of starting one")
     add("metrics-check", cmd_metrics_check, "compile every metrics.csv expression in DuckDB")
@@ -744,7 +755,7 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--recreate", action="store_true")
     td = add("teardown", cmd_teardown, "PERMANENTLY delete the demo's Wisdom app, agent, eval set and domain (dry-run without --i-mean-it)")
     td.add_argument("--i-mean-it", action="store_true")
-    he = add("health", cmd_health, "queue a Domain Health analysis run (report-only)")
+    he = add("health", cmd_health, "queue a Domain Health analysis run and leave it running for the SE (always the last step of a build)")
     he.add_argument("--apply", action="store_true")
     add("report", cmd_report, "write DEMO_REPORT.md from .state.json")
     al = add("all", cmd_all, "run every step in order (skips steps already ok); dry-run without --apply")

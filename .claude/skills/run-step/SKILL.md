@@ -61,17 +61,30 @@ Rendering errors name the markdown file and line; fix the markdown (tables need 
 
 ## publish — `demo publish <demo> --apply`
 Each sub-step reads back what it created. `permission` errors → stop and tell the user the key's user
-is not in the workspace (/setup). Other GraphQL errors → read the message, fix the input (e.g. a
-knowledge entry over the length limit, a metric SQL Wisdom rejects), re-run; publish is idempotent.
+is not in the workspace (/setup). Other GraphQL errors → read the message, fix the input, re-run; publish
+is idempotent. In `context_mode: extractor` (default) the `knowledge`, `metrics` and `reviewed_queries`
+steps are **skipped by design**; context arrives through `extraction` only.
+
+## extraction — `demo publish <demo> --apply --only extraction`
+Renders `build/context/*` (dbt semantic YAML, certified query library `.sql`, analyst handbook `.txt`),
+uploads them with the authored `context_assets[]` PDFs, triggers one run with all agent types, waits,
+accepts the knowledge / synonym / metric / reviewed-query suggestions, leaves description rewrites
+pending, and reads back coverage. `failed` with "coverage below" after the automatic forced retry →
+look at the missing names, make the asset more explicit (clearer `-- question:` blocks, exact
+`meta.sql_expression`, file `instructions` in `context_assets[]`), re-run. If the connection filter was
+just changed, refresh the connection first (`attach_database` needs the crawl). Never fix a coverage
+gap by uploading a CSV or calling the direct API — that is the one thing this step must not do.
 
 ## eval — `demo eval <demo>`
-The eval is a report, not a gate: run it, record the score in `.state.json` / `build/eval_results.json`,
+The eval is a report, not a gate: it always runs the eval set **at least 3 times** (`run_count` >= 3) and
+records the mean score, per-run scores and flaky prompts in `.state.json` / `build/eval_results.json`,
 and mention the score and any failing prompts in the final summary. Do **not** change context or
 re-run to chase the score unless the user asks. `--report-last` reports the last completed run.
 
-## health — `demo health <demo> --apply`
-Queues a Domain Health analysis run and records the job id. Report-only: never apply or act on its
-suggestions. If it says `alreadyQueued`, that is fine.
+## health — `demo health <demo> --apply` (always the LAST step of a build)
+Queues a Domain Health analysis run, records the job id and **leaves it running** so the SE can demo
+the suggestions it creates. Never apply, act on, or cancel them. If it says `alreadyQueued`, that is fine.
+Run it after `report`, never before the app / chat / agent steps.
 
 ## app / chat / agent — `demo app|chat|agent <demo> --apply`
 app: fewer tabs than `live_app.tabs` → tighten the prompt (name each page explicitly), recreate.

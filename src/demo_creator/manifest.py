@@ -38,9 +38,14 @@ class State:
             return cls(path, json.loads(path.read_text()))
         return cls(path)
 
-    def save(self) -> None:
+    def save(self, delta: dict[str, Any] | None = None) -> None:
         """Read-merge-write under a file lock: several `demo` processes (eval, app,
-        chat) may run at once and each must not clobber the others' ids."""
+        chat, a long publish) may run at once and each must not clobber the others.
+        Only `delta` (the keys this call changed) is merged over the file; merging
+        the whole in-memory copy would let a long-running process overwrite values
+        another process wrote after this one last read the file (seen 2026-10-13:
+        a 25-minute extraction wait reverted a fresh eval score). With no delta
+        the full in-memory state is written (used by `overwrite`)."""
         import fcntl
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +56,9 @@ class State:
                 on_disk = json.loads(self.path.read_text()) if self.path.is_file() else {}
             except ValueError:
                 on_disk = {}
-            merged = _deep_merge(on_disk, self.data)
+            merged = _deep_merge(on_disk, delta if delta is not None else self.data)
+            for section in ("steps", "wisdom", "snowflake"):
+                merged.setdefault(section, {})
             self.data = merged
             self.path.write_text(json.dumps(merged, indent=2, sort_keys=True, default=str) + "\n")
             fcntl.flock(lk, fcntl.LOCK_UN)
@@ -61,7 +68,7 @@ class State:
         entry = {"status": status, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         entry.update(info)
         self.data["steps"][step] = entry
-        self.save()
+        self.save({"steps": {step: entry}})
 
     def step(self, name: str) -> dict[str, Any]:
         return self.data["steps"].get(name, {})
@@ -102,4 +109,4 @@ class State:
 
     def set(self, section: str, key: str, value: Any) -> None:
         self.data.setdefault(section, {})[key] = value
-        self.save()
+        self.save({section: {key: value}})

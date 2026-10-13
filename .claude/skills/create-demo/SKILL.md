@@ -52,17 +52,20 @@ where to resume and `demo all <slug> --apply` skips finished steps.
 | C1 | Write `01_snowflake_ddl.sql` (Prompt B in the build guide; `COMMENT` on every table and column; `PRIMARY KEY` on every dimension; `REFERENCES` on every FK; views portable to DuckDB — ANSI CASE, `DATE 'YYYY-MM-DD'`, no `::`, no `IFF`, no positional GROUP BY). Fill `snowflake.load_order`/`views`. | `demo ddl --apply` | `ok: true` (heal per /run-step schema) |
 | C2 | Write `generator.py` (pattern: `demos/halcyon/generator.py` — `rng(tag)` from `demo_creator.rng`, constants from `demo.yaml`, one builder per table in FK order, `generate_all()` returning `{TABLE: DataFrame}`; realistic distributions; explicit story injection with a comment naming the control point) and `checks.py` (`run(q, check, spec)`; one `check()` per target in every control point, plus a baseline sanity check). | `demo generate` → set `expected_rows` from the counts → `demo validate` | ALL CHECKS PASSED |
 | C3 | — | `demo load --apply` → `demo validate --snowflake` | counts match, checks pass in Snowflake |
-| C4 | Write `02_wace_bootstrap.md` (10 sections, Prompt D; verify every column name against the DDL — Prompt F), `knowledge.csv` (15–25 one-sentence facts incl. the as-of date and each hero entity), `metrics.csv` (15–35 metrics as `AGG(VIEW.COLUMN)` expressions over the views), `reviewed_queries.py` (25–60 pairs: 5 lookups, 10+ analytical, each story arc as a 3-question chain, the follow-up question itself; no commas in questions; SQL that returns rows). | `demo rq-check --snowflake` → `demo metrics-check` | all ok |
+| C4 | Write `02_wace_bootstrap.md` (10 sections, Prompt D; verify every column name against the DDL — Prompt F), `knowledge.csv` (15–25 one-sentence facts incl. the as-of date and each hero entity), `metrics.csv` (15–35 metrics as `AGG(VIEW.COLUMN)` expressions over the views), `reviewed_queries.py` (25–60 pairs: 5 lookups, 10+ analytical, each story arc as a 3-question chain, the follow-up question itself; no commas in questions; SQL that returns rows). These stay local as the source of truth for checks and the eval; **they never go to the domain as CSVs** — the publish step renders them into a dbt semantic-layer YAML, a certified query library `.sql` and an analyst handbook for the context extractor. Also write 4–7 **authored context assets** under `docs/` and list them in `context_assets[]`: a metric definitions standard, a business glossary with owners/stewards/source systems, a data-platform wiki page, a chat-channel export, plus the story documents (memo, bulletin, playbook). They must read like the real thing, not like a prompt. | `demo rq-check --snowflake` → `demo metrics-check` | all ok |
 | C5 | Write `docs/*.md` document specs if the plan has documents (letterhead block, headings, bullets, tables). | `demo docs` | rendered |
-| C6 | — | `demo publish --apply` | every publish step ok |
-| C7 | — | `demo eval` → `demo health --apply` | eval run completes (score reported, never chased); Domain Health analysis queued (never acted on) |
+| C6 | — | `demo publish --apply` | every publish step ok; the `extraction` step reports coverage (metrics and reviewed queries found in the domain vs. expected ≥ 90%, knowledge count, suggestions accepted / left pending). If coverage is short after its one automatic retry, improve the asset wording or file instructions and re-run `publish --only extraction`; never upload CSVs |
+| C7 | — | `demo eval` | eval runs **at least 3 times** and completes (mean score and flaky prompts reported, never chased) |
 | C8 | Write `live_app_prompt.md` (from `docs/templates/live_app_prompt_template.md`), `agent_prompt.md` (from `docs/templates/agent_prompt_template.md`), set `chat.followup_question` / `expected_points`. | `demo app --apply` → `demo chat --apply` → `demo agent --apply` | app built; answer hits the expected points; agent is a draft |
 | C9 | /demo-script | `demo report` | `DEMO_SCRIPT.md` + `DEMO_REPORT.md` exist |
+| C10 | — | `demo health --apply` | **always the last step**: the Domain Health analysis is queued and **left running** so the SE can demo the suggestions it creates. Never act on them, never cancel it |
 
 If a Wisdom step is impossible through the API (the command says so), do that step with the
 Claude-in-Chrome skill using the same prompt, then record the ids in `.state.json` and continue.
 
 ## Finish
-Reply with: what was built (one line each: data, domain, Live App, chat, agent, script), the
-links/ids from `DEMO_REPORT.md`, anything skipped and why, and the one thing to check before the
-demo (open the Live App once so it is cached).
+Reply with: what was built (one line each: data, domain, Live App, chat, agent, script), **the clickable
+links from the `## Links` block of `DEMO_REPORT.md` pasted in full (Live App, follow-up chat, agent, domain,
+Domain Health, connection)** — the user always needs the links, never just ids —, the extraction coverage figures, the Domain Health job id that is
+running, anything skipped and why, and the one thing to check before the demo (open the Live App once
+so it is cached).

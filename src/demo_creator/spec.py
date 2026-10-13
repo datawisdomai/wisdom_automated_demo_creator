@@ -66,6 +66,8 @@ class WisdomSpec:
     reviewed_by: str = ""
     lookup_columns: list[str] = field(default_factory=list)
     eval: dict[str, Any] = field(default_factory=dict)
+    context_mode: str = "extractor"            # extractor (default: all context via the context extractor) | direct (legacy CSV/API path)
+    extraction: dict[str, Any] = field(default_factory=dict)   # accept: [knowledge, synonyms, metrics, reviewed_queries]; coverage_threshold: 0.9
 
 
 @dataclass
@@ -194,6 +196,8 @@ def load_spec(name_or_path: str | Path) -> DemoSpec:
         reviewed_by=w_raw.get("reviewed_by", ""),
         lookup_columns=list(w_raw.get("lookup_columns") or []),
         eval=dict(w_raw.get("eval") or {}),
+        context_mode=str(w_raw.get("context_mode") or "extractor"),
+        extraction=dict(w_raw.get("extraction") or {}),
     )
 
     return DemoSpec(
@@ -243,6 +247,13 @@ def validate_spec(spec: DemoSpec, *, stage: str = "all") -> list[str]:
         problems.append(f"as_of {spec.as_of} is before data_start {spec.data_start}")
     if not spec.seed:
         problems.append("seed must be a non-zero integer")
+    if spec.wisdom.context_mode not in ("extractor", "direct"):
+        problems.append("wisdom.context_mode must be 'extractor' (default) or 'direct'")
+    try:
+        if int(spec.wisdom.eval.get("run_count") or 3) < 3:
+            problems.append("wisdom.eval.run_count must be at least 3 (every eval set runs a minimum of 3 times)")
+    except (TypeError, ValueError):
+        problems.append("wisdom.eval.run_count must be an integer >= 3")
 
     if not spec.ddl_path.is_file():
         problems.append(f"DDL file missing: {spec.ddl_path.name}")

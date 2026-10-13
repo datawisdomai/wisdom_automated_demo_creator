@@ -18,6 +18,8 @@ problem], finds [the cause], models [the fix] and automates [the watch]. Nothing
 - Facts: [3-5 tables, ~N rows in the main fact]
 - Views: [V_... 4-8 analytical views]
 - Documents: [0-3 PDFs: e.g. carrier contract, surcharge bulletin] (or "none")
+- Context assets (go through the context extractor, never as CSV): [metric definitions standard, business glossary with owners, data-platform wiki page, chat-channel export, plus the story documents]; the pipeline adds a dbt semantic-layer YAML, a certified query library and an analyst handbook rendered from the local definitions
+- Final step: Domain Health analysis queued and left running for the SE
 
 ## What the audience sees
 1. **Live App "[name]"** — Executive Overview → [Scenario Lab] → Implementation Plan

@@ -116,10 +116,22 @@ def render_pdf(md_path: Path, out_path: Path, *, title: str | None = None) -> Pa
     return out_path
 
 
+def context_assets(spec) -> list[dict]:
+    """`context_assets[]` in demo.yaml: specs rendered like documents but uploaded to the
+    domain's context extractor (glossary, metric standards, wiki pages, chat exports)
+    instead of the dataset. Optional; loading is tolerant of its absence."""
+    return list(spec.raw.get("context_assets") or [])
+
+
 def render_all(spec, *, echo: bool = True) -> list[dict]:
-    """Render every `documents[]` spec to build/docs/<name>.pdf."""
+    """Render every `documents[]` and `context_assets[]` spec to build/docs/<name>.pdf
+    (a spec listed in both is rendered once)."""
     out = []
-    for d in spec.documents:
+    seen = set()
+    for d in list(spec.documents) + context_assets(spec):
+        if d["spec"] in seen:
+            continue
+        seen.add(d["spec"])
         src = spec.dir / d["spec"]
         pdf = spec.paths.docs_out / (Path(d["spec"]).stem + ".pdf")
         try:

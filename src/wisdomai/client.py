@@ -665,7 +665,14 @@ class Client:
         for f, u in zip(files, urls):
             r = httpx.put(u["signedUrl"], content=f.read_bytes(), headers={"Content-Type": "application/octet-stream"}, timeout=120)
             r.raise_for_status()
-        reg_files = [{"file": {"name": u["key"]}, "instructions": instructions, "acceptanceStrategy": acceptance} for u in urls]
+        # FileInput needs the object's bucket source (verified on proddemo 2026-10-12: a bare name is
+        # rejected with "file source type is not supported"); name is the original file name.
+        reg_files = []
+        for f, u in zip(files, urls):
+            bt = (u.get("bucketType") or "").upper()
+            src = {"bucketName": u["bucketDescriptor"], "key": u["key"]}
+            file_input = {"name": f.name, ("gcsSource" if "GCS" in bt or "GOOGLE" in bt else "s3Source"): src}
+            reg_files.append({"file": file_input, "instructions": instructions, "acceptanceStrategy": acceptance})
         reg = self.request(ops.REGISTER_CONTEXT_EXTRACTION_UPLOADED_FILES, {"input": {"domainId": domain_id, "files": reg_files}},
                            op_name="registerContextExtractionUploadedFiles")
         return {"keys": [u["key"] for u in urls], "register": reg}
@@ -678,14 +685,29 @@ class Client:
         return self.request(ops.CONTEXT_EXTRACTION_UPLOADED_FILES, {"input": {"domainId": domain_id, "connectionId": connection_id}},
                             op_name="contextExtractionUploadedFiles")["contextExtractionUploadedFiles"]
 
+    def attach_context_extraction_connection(self, domain_id: str, connection_id: str = "files", *,
+                                             acceptance: str = "AUTO_ACCEPT_HIGH_CONFIDENCE", auto_extract: bool = False) -> dict:
+        """Attach a context-extraction source to the domain. A fresh domain has no sources; the
+        uploaded-files source is the pseudo connection id "files" (verified on proddemo 2026-10-12)."""
+        return self.request(ops.ATTACH_CONTEXT_EXTRACTION_CONNECTION,
+                            {"domainId": domain_id, "connectionId": connection_id, "acceptanceStrategy": acceptance, "autoExtractEnabled": auto_extract},
+                            op_name="attachContextExtractionConnection")
+
+    def delete_context_extraction_uploaded_file(self, domain_id: str, source_file_id: str, connection_id: str = "files") -> dict:
+        q = "mutation($input: DeleteContextExtractionUploadedFileInput!){ deleteContextExtractionUploadedFile(input: $input){ __typename } }"
+        return self.request(q, {"input": {"domainId": domain_id, "connectionId": connection_id, "sourceFileId": source_file_id}},
+                            op_name="deleteContextExtractionUploadedFile")
+
     def trigger_knowledge_extraction(self, domain_id: str, connection_id: str, file_names: list[str] | None = None,
-                                     agent_types: list[str] | None = None) -> dict:
+                                     agent_types: list[str] | None = None, *, force_full: bool | None = None) -> dict:
         src = {"connectionId": connection_id}
         if file_names:
             src["fileNames"] = file_names
         inp = {"domainId": domain_id, "sources": [src]}
         if agent_types:
             inp["agentTypes"] = agent_types
+        if force_full is not None:
+            inp["forceFullExtraction"] = force_full
         return self.request(ops.TRIGGER_KNOWLEDGE_EXTRACTION, {"input": inp}, op_name="triggerKnowledgeExtraction")
 
     def upload_dataset_files(self, domain_id: str, paths: list, *, dataset_id: str | None = None) -> dict:

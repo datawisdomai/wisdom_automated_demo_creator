@@ -18,6 +18,35 @@ def base_url(spec: DemoSpec) -> str:
     return f"https://{host}"
 
 
+def _slugify(name: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+
+
+def links(spec: DemoSpec, state: State) -> dict[str, str]:
+    """Clickable UI links for everything the build created. URL patterns verified in the
+    proddemo UI on 2026-10-13: /apps/<slug>--<app_id>, /agents/<id>/edit, /chat/<conversation>,
+    /domains/<id>, /domains/<id>/domain-health, /connections/<id>."""
+    w = state.wisdom
+    url = base_url(spec)
+    out: dict[str, str] = {"Instance": url}
+    if w.get("domain_id"):
+        out["Domain"] = f"{url}/domains/{w['domain_id']}"
+        out["Domain Health"] = f"{url}/domains/{w['domain_id']}/domain-health"
+    if w.get("app_id"):
+        out["Live App"] = f"{url}/apps/{_slugify(w.get('app_name') or spec.live_app.get('name', 'app'))}--{w['app_id']}"
+    conv = w.get("followup_conversation_id") or (state.step("chat") or {}).get("conversation_id")
+    if conv:
+        out["Follow-up chat"] = f"{url}/chat/{conv}"
+    if w.get("app_conversation_id"):
+        out["Live App build conversation"] = f"{url}/chat/{w['app_conversation_id']}"
+    if w.get("agent_id"):
+        out["Agent"] = f"{url}/agents/{w['agent_id']}/edit"
+    if w.get("connection_id"):
+        out["Connection"] = f"{url}/connections/{w['connection_id']}"
+    return out
+
+
 def render(spec: DemoSpec, state: State) -> str:
     w = state.wisdom
     url = base_url(spec)
@@ -35,6 +64,10 @@ def render(spec: DemoSpec, state: State) -> str:
               f"| Domain Health run | job `{w.get('health_job_run_id', 'not triggered')}` (review in the Domain Health tab) |",
               f"| Documents | {len(w.get('uploaded_documents') or [])} uploaded |",
               f"| Instance | {url} |", ""]
+    lines += ["## Links", ""]
+    for label, href in links(spec, state).items():
+        lines.append(f"- **{label}**: {href}")
+    lines.append("")
     lines += ["## Steps", "", "| Step | Status | When | Notes |", "|---|---|---|---|"]
     for step in STEP_ORDER + [s for s in state.data["steps"] if s not in STEP_ORDER]:
         info = state.data["steps"].get(step)
@@ -51,7 +84,10 @@ def render(spec: DemoSpec, state: State) -> str:
         for s in skipped:
             lines.append(f"- `{s}` step has not run (`demo {s} {spec.name} --apply`)")
         for m in manual:
-            lines.append(f"- {m.get('kind', 'step')}: {', '.join(f'{k}={v}' for k, v in m.items() if k != 'kind')}")
+            if isinstance(m, dict):
+                lines.append(f"- {m.get('kind', 'step')}: {', '.join(f'{k}={v}' for k, v in m.items() if k != 'kind')}")
+            else:  # a plain sentence in demo.yaml is fine too
+                lines.append(f"- {m}")
         lines.append("")
     lines += ["## Control points in the data", ""]
     for cp in spec.control_points:

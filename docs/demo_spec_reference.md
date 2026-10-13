@@ -35,7 +35,10 @@ generator, checks, bootstrap, questions, prompts) and what the `demo` CLI execut
 | `wisdom.domain_name/domain_description/dialect` | yes | domain identity; dialect is `snowflake` |
 | `wisdom.bootstrap/knowledge_csv/metrics_csv` | yes | context files; bootstrap sections 7–10 also become knowledge entries |
 | `wisdom.lookup_columns` | no | `TABLE.COLUMN` noun columns to enable lookup (NER) on |
-| `wisdom.eval` | no | `name`, `run_count` (keep 1), `experimental_mode`; the eval only reports a score, it never gates the build |
+| `wisdom.context_mode` | no | `extractor` (default): knowledge, metrics and reviewed queries reach the domain **only** through the context extractor, rendered as a dbt semantic-layer YAML, a certified query library `.sql` and an analyst handbook; `direct` is the legacy CSV/API path and must not be used for new builds |
+| `wisdom.extraction` | no | `accept` (suggestion families accepted after a run; default `[knowledge, synonyms, metrics, reviewed_queries]` — descriptions stay pending for steward review), `coverage_threshold` (default 0.9 for metrics and reviewed queries found in the domain) |
+| `context_assets[]` | no | `{spec: docs/<file>.md, kind: standard|glossary|wiki|chat_export|memo|bulletin|playbook, instructions?}` authored assets rendered to PDF and uploaded to the extractor; they carry the story facts in a realistic voice |
+| `wisdom.eval` | no | `name`, `run_count` (minimum 3, enforced; the mean score over the run group is reported with the flaky prompts), `experimental_mode`; the eval only reports a score, it never gates the build |
 | `script.template/output` | yes | demo-script template and output file |
 | `manual_steps[]` | no | anything still done by hand; rendered into `DEMO_REPORT.md` |
 

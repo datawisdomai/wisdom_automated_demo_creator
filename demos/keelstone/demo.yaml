@@ -1,0 +1,142 @@
+name: keelstone
+title: Keelstone Data Systems
+vertical: Technology
+built_for: NetApp conversation (governed self-service on Snowflake; no prospect names appear in the data)
+as_of: 2026-10-12
+data_start: 2025-05-01
+seed: 20261012
+inputs: [inputs/netapp_requirements_email.md]
+
+persona:
+  primary: VP of Sales Operations
+  secondary: [FP&A Director (Finance), Head of Renewals and Customer Success, Data Steward (Finance data domain), Executive staff]
+  kpis: [ARR, NRR, renewal rate, at-risk ARR in the next 90 days, support attach rate, cloud commit utilization, installed base health]
+
+snowflake:
+  database: KEELSTONE_POC
+  schema: ANALYTICS
+  ddl: 01_snowflake_ddl.sql
+  load_order: [FISCAL_CALENDAR, PARTNERS, SALES_REPS, CUSTOMERS, PRODUCTS,
+               ORDERS, INSTALLED_SYSTEMS, SYSTEM_TELEMETRY_MONTHLY, CONTRACTS, RENEWAL_OPPORTUNITIES,
+               CLOUD_CONSUMPTION_MONTHLY, SUPPORT_CASES, DATA_DICTIONARY]
+  views: [V_ARR_MONTHLY, V_ARR_FINANCE_VS_SALESOPS, V_RENEWAL_PERFORMANCE, V_RENEWALS_AT_RISK_90D,
+          V_INSTALLED_BASE_HEALTH, V_CLOUD_COMMIT_UTILIZATION, V_SUPPORT_CASE_SUMMARY, V_PARTNER_ATTACH_RATE]
+  expected_rows:
+    FISCAL_CALENDAR: 1095
+    PARTNERS: 25
+    SALES_REPS: 60
+    CUSTOMERS: 400
+    PRODUCTS: 23
+    ORDERS: 5711
+    INSTALLED_SYSTEMS: 2334
+    SYSTEM_TELEMETRY_MONTHLY: 32260
+    CONTRACTS: 10684
+    RENEWAL_OPPORTUNITIES: 5153
+    CLOUD_CONSUMPTION_MONTHLY: 2119
+    SUPPORT_CASES: 5285
+    DATA_DICTIONARY: 24
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    FISCAL_YEAR_END_MONTH: 4
+    HERO_REGION: Americas East
+    EOS_PRODUCT_FAMILY: KS-7000
+    EOS_DATE: 2027-01-31
+    EOS_ANNOUNCED: 2026-06-15
+    BAD_FIRMWARE: KeelOS 9.14.2
+    BAD_FIRMWARE_RELEASE: 2026-07-01
+    RENEWAL_SLIP_START: 2026-05-01
+    CLOUD_SERVICE: Keelstone Cloud Volumes
+    HERO_PARTNER: Altura Technology Partners
+    PARTNER_ATTACH_SLIP_START: 2026-05-01
+
+control_points:
+  - id: CP1
+    name: Americas East renewal rate slips on KS-7000 end of support and KeelOS 9.14 P1 cases
+    hero: Americas East
+    targets:
+      - {metric: amer_east_renewal_rate_drop_pts, op: ">=", value: 0.06}
+      - {metric: amer_east_arr_renewing_90d, op: ">=", value: 15000000}
+      - {metric: amer_east_arr_at_risk_90d, op: ">=", value: 5000000}
+      - {metric: amer_east_keelos914_p1_ratio_vs_next_region, op: ">=", value: 3}
+  - id: CP2
+    name: Sales Ops ARR exceeds certified Finance ARR because open renewal quotes are counted
+    targets:
+      - {metric: salesops_vs_finance_arr_gap_sep2026, op: ">=", value: 0.05}
+      - {metric: salesops_vs_finance_arr_gap_sep2026, op: "<=", value: 0.08}
+  - id: CP3
+    name: Keelstone Cloud Volumes consumption grows while enterprise commits go unused
+    hero: Keelstone Cloud Volumes
+    targets:
+      - {metric: cloud_consumption_yoy_growth, op: ">=", value: 0.35}
+      - {metric: enterprise_accounts_under_60pct_commit, op: ">=", value: 20}
+  - id: CP4
+    name: Altura Technology Partners support attach rate falls while peer partners hold
+    hero: Altura Technology Partners
+    targets:
+      - {metric: altura_attach_rate_drop_pts, op: ">=", value: 0.12}
+      - {metric: peer_partner_attach_rate_max_abs_change_pts, op: "<=", value: 0.03}
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+documents:
+  - {spec: docs/installed_base_review_q1_fy27.md, kind: memo}
+  - {spec: docs/lifecycle_bulletin_ks7000_eos.md, kind: bulletin}
+  - {spec: docs/renewal_playbook_fy27.md, kind: playbook}
+
+# Assets pushed through Wisdom context extraction (glossary / semantic context come FROM documents).
+# Rendered to PDF like documents[]; uploaded to the domain's context-extraction store, not the dataset.
+context_assets:
+  - {spec: docs/finance_metric_definitions_v3_2.md, kind: standard}
+  - {spec: docs/business_glossary_and_ownership.md, kind: glossary}
+  - {spec: docs/data_platform_wiki_onboarding_notes.md, kind: wiki}
+  - {spec: docs/data_help_channel_export.md, kind: chat_export}
+  - {spec: docs/installed_base_review_q1_fy27.md, kind: memo}
+  - {spec: docs/lifecycle_bulletin_ks7000_eos.md, kind: bulletin}
+  - {spec: docs/renewal_playbook_fy27.md, kind: playbook}
+
+live_app:
+  name: Renewals and Installed Base Cockpit
+  prompt: live_app_prompt.md
+  tabs: [Executive Overview, Scenario Lab, Implementation Plan]
+
+chat:
+  followup_question: Which region's renewal rate has dropped the most this fiscal year and what is driving it and how much ARR is up for renewal there in the next 90 days?
+  expected_points:
+    - Americas East is the region with the largest renewal rate drop
+    - renewal rate is roughly 11 points below the FY26 level (about 79 percent versus 90 percent)
+    - KS-7000 end of support is a driver
+    - KeelOS 9.14 P1 support cases are a driver
+    - about 28 million dollars of ARR renews in the next 90 days with about 13 million flagged at risk
+
+agent:
+  name: Renewal Risk Watch
+  prompt: agent_prompt.md
+  enabled: false
+
+wisdom:
+  deployment: proddemo
+  workspace_id: ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024   # Default Organization (not Certified Demos)
+  connection: {name: Snowflake Demo}                           # existing shared connection, user WISDOMAI_PROD
+  domain_name: Keelstone Data Systems
+  domain_description: Fictional hybrid-cloud storage and data infrastructure vendor. Demo today is 2026-10-12 (Q2 FY27; fiscal year ends 30 April); data spans 2025-05-01 to 2026-10-12. Snowflake KEELSTONE_POC.ANALYTICS.
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by:
+  lookup_columns: [CUSTOMERS.CUSTOMER_NAME, PARTNERS.PARTNER_NAME, PRODUCTS.PRODUCT_FAMILY, CUSTOMERS.REGION, SALES_REPS.REP_NAME]
+  eval: {run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}
+  context_mode: direct   # built 2026-10-13 before the extractor-only rule; metrics/RQs/knowledge were loaded directly. New builds use `extractor`.
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md
+
+manual_steps:
+  - Add KEELSTONE_POC to the database filter of the "Snowflake Demo" connection in Default Organization (done in the browser during the build, not by the pipeline).

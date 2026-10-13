@@ -124,9 +124,10 @@ wisdom:
   lookup_columns: [CUSTOMERS.CUSTOMER_NAME, PRODUCTS.PRODUCT_NAME, MANUFACTURERS.MANUFACTURER_NAME, DISTRIBUTION_CENTERS.DC_NAME, CUSTOMERS.ACCOUNT_MANAGER]
   eval:
     name: Halcyon reviewed queries
-    run_count: 1
+    run_count: 3
     experimental_mode: EXPERIMENTAL_MODE_NONE
     pass_threshold: 0.9
+  context_mode: direct   # reference demo built before the extractor-only rule (2026-10-13); new builds use `extractor`
 
 script:
   template: docs/templates/demo_script_example.md

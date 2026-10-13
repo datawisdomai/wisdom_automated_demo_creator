@@ -9,8 +9,9 @@ someone says "build me a demo for X", run that skill. First-time users run `/set
 2. **One approval**: write `demos/<name>/DEMO_PLAN.md` + `demo.yaml`; present it in plain language;
    iterate until the user says go. Nothing touches Snowflake or Wisdom before that.
 3. **Execute autonomously** with self-healing: schema → data → load → context → docs → publish →
-   eval → Live App / chat / agent → script + report. Each step has a bounded repair loop (3 tries);
-   on exhaustion, stop and explain in plain language. The user never has to read SQL.
+   eval → Live App / chat / agent → script + report → **Domain Health analysis last, left running**.
+   Each step has a bounded repair loop (3 tries); on exhaustion, stop and explain in plain language.
+   The user never has to read SQL.
 
 Writes after approval are pre-authorised **only** inside the demo's own Snowflake database and its
 own Wisdom domain in the configured workspace. Anything destructive outside that (deleting a domain,
@@ -37,9 +38,25 @@ dropping a database, touching another workspace) is announced and confirmed firs
   403 on `connections`/`domains` for a workspace = the key's user is not a member.
 - Reviewed queries: `dialect="snowflake"`; NL text must not contain commas (CSV import).
 - `run_sql(..., dialect="snowflake", database_name=<DB>)` ~5 s/query; `tablePreview.totalRows` is wrong.
-- Evals: `run_count=1` (more returns a run-group id you cannot poll); never
+- Evals: **every eval set runs at least 3 times** (`run_count` >= 3; the pipeline enforces the floor, reports the
+  mean score and the run group's flaky prompts; `runEvaluation` returns the run-group id and the runs are found
+  via `evaluationRuns(evalSetIds)` sharing `runGroupId`); never
   `createEvalsetFromReviewedQueries(runEval=True)`.
 - Knowledge de-dups by description; metrics do not — track names in `.state.json`.
+- **Context enters the domain only through the context extractor** (`wisdom.context_mode: extractor`, the
+  default). The local `metrics.csv` / `reviewed_queries.py` / `knowledge.csv` stay the source of truth for
+  `rq-check`, `metrics-check` and the eval set, but the domain receives them *disguised* as real assets —
+  a dbt semantic-layer YAML, a certified query library `.sql`, an analyst handbook — plus the authored
+  `context_assets[]` (glossary, metric standard, wiki page, chat export …). The extraction step accepts the
+  knowledge / synonym / metric / reviewed-query suggestions, leaves description rewrites pending for the
+  steward-review demo beat, reads back coverage and retries once; it never falls back to CSV uploads.
+  Extractor file facts: upload connection id is `files` (attach it first); FileInput needs the GCS/S3
+  source from the signed URL; `.yml .yaml .sql .txt .csv .pdf` register, `.md` does not.
+- `DEMO_REPORT.md` and `DEMO_SCRIPT.md` always carry **clickable links** (Live App `/apps/<slug>--<app_id>`,
+  chat `/chat/<conversation>`, agent `/agents/<id>/edit`, domain `/domains/<id>`, Domain Health tab,
+  connection `/connections/<id>`) via `report.links()`; the finish message pastes them. Ids alone are not enough.
+- **The last step of every build is `demo health --apply`**: queue the Domain Health analysis and leave it
+  running so the SE can demo the suggestions it creates. Never act on them.
 
 ## Snowflake rules
 - One database per demo (`<NAME>_POC`), one schema; `CREATE OR REPLACE`; `COMMENT` on every table and
@@ -52,6 +69,6 @@ dropping a database, touching another workspace) is announced and confirmed firs
 `doctor` · `new` · `generate` · `schema-diff` · `validate [--snowflake]` · `rq-check [--snowflake]` ·
 `metrics-check` · `ddl [--apply] [--start-at N] [--grants]` · `load [--apply] [--tables ...]` · `docs` ·
 `publish [--apply] [--only ...]` · `eval [--report-last]` · `health [--apply]` · `app [--apply]` · `chat [--apply] [--question ...]` ·
-`agent [--apply]` · `report` · `all [--apply] [--redo]` · `status`.
+`agent [--apply]` · `report` · `health [--apply]` (always last, left running) · `all [--apply] [--redo]` · `status`.
 Skills: `/setup`, `/create-demo` (front door), `/run-step` (heal one step), `/demo-script`.
 Reference demo: `demos/halcyon/` (migrated from `wisdom demos/halcyon_poc`; same seed, same rows).

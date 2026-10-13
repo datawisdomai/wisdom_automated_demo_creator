@@ -1,0 +1,294 @@
+{
+  "snowflake": {
+    "database": "KEELSTONE_POC",
+    "schema": "ANALYTICS"
+  },
+  "steps": {
+    "agent": {
+      "agent_id": "AGENT_146c8d79-a16a-47b7-b3da-d8511b10e515",
+      "at": "2026-10-13T04:16:50+00:00",
+      "is_draft": true,
+      "nodes": 9,
+      "status": "ok"
+    },
+    "app": {
+      "app_id": "app_4c27c3346904444482aae6d66649c4b6",
+      "at": "2026-10-13T04:20:41+00:00",
+      "conversation_id": "f897adbd-3dcf-46d1-b7ce-ea1a4b803171",
+      "live_spec_version": 2,
+      "seconds": 531.3,
+      "status": "ok"
+    },
+    "chat": {
+      "at": "2026-10-13T04:22:31+00:00",
+      "completed": true,
+      "conversation_id": "e8daec43-eb9c-409d-a0a9-ef43ba576350",
+      "judge_note": "lexical judge saw 3/5 because the figures (79.09% vs 90.27%, $28.16M, $13.14M) are rendered in composed-response widgets absent from the message delta",
+      "judged_by": "Claude (browser review of the answer widgets, 2026-10-13)",
+      "judged_hits": 5,
+      "judged_total": 5,
+      "score": 0.6,
+      "seconds": 95.1,
+      "status": "ok"
+    },
+    "ddl": {
+      "at": "2026-10-13T00:14:30+00:00",
+      "seconds": 12,
+      "statements": 28,
+      "status": "ok"
+    },
+    "docs": {
+      "at": "2026-10-13T00:30:11+00:00",
+      "failures": [],
+      "rendered": [
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/installed_base_review_q1_fy27.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/lifecycle_bulletin_ks7000_eos.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/renewal_playbook_fy27.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/finance_metric_definitions_v3_2.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/business_glossary_and_ownership.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/data_platform_wiki_onboarding_notes.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/keelstone/build/docs/data_help_channel_export.pdf"
+      ],
+      "status": "ok"
+    },
+    "eval": {
+      "at": "2026-10-13T04:29:52+00:00",
+      "consistently_failing": 2,
+      "consistently_passing": 43,
+      "flaky": 3,
+      "passed": 45,
+      "run_group_id": "ET_JOB_RUN_591deee0e18d4edebf38b30f97dc56c7",
+      "run_id": "ET_JOB_RUN_702f132be9b74f19a3ca932d5c7a4042",
+      "run_ids": [
+        "ET_JOB_RUN_07246c59eb8042bba71cc91c20687f64",
+        "ET_JOB_RUN_1b12f44f4ce745f88e7a25eaa920d6b0",
+        "ET_JOB_RUN_702f132be9b74f19a3ca932d5c7a4042"
+      ],
+      "run_scores": [
+        0.8958333333333334,
+        0.9375,
+        0.9375
+      ],
+      "score": 0.9236111111111112,
+      "status": "ok",
+      "total": 48
+    },
+    "generate": {
+      "at": "2026-10-13T00:29:52+00:00",
+      "counts": {
+        "CLOUD_CONSUMPTION_MONTHLY": 2119,
+        "CONTRACTS": 10684,
+        "CUSTOMERS": 400,
+        "DATA_DICTIONARY": 24,
+        "FISCAL_CALENDAR": 1095,
+        "INSTALLED_SYSTEMS": 2334,
+        "ORDERS": 5711,
+        "PARTNERS": 25,
+        "PRODUCTS": 23,
+        "RENEWAL_OPPORTUNITIES": 5153,
+        "SALES_REPS": 60,
+        "SUPPORT_CASES": 5285,
+        "SYSTEM_TELEMETRY_MONTHLY": 32260
+      },
+      "mismatches": [],
+      "missing": [],
+      "schema_errors": [],
+      "seconds": 1,
+      "status": "ok"
+    },
+    "grants": {
+      "at": "2026-10-13T00:14:35+00:00",
+      "seconds": 1,
+      "statements": 7,
+      "status": "ok"
+    },
+    "health": {
+      "already_queued": false,
+      "at": "2026-10-13T04:15:57+00:00",
+      "code": "OK",
+      "job_run_id": "ET_JOB_RUN_5b96c547fd4f4f2882e665dbc776c09c",
+      "status": "ok"
+    },
+    "load": {
+      "at": "2026-10-13T00:29:58+00:00",
+      "counts": {
+        "CLOUD_CONSUMPTION_MONTHLY": 2119,
+        "CONTRACTS": 10684,
+        "CUSTOMERS": 400,
+        "DATA_DICTIONARY": 24,
+        "FISCAL_CALENDAR": 1095,
+        "INSTALLED_SYSTEMS": 2334,
+        "ORDERS": 5711,
+        "PARTNERS": 25,
+        "PRODUCTS": 23,
+        "RENEWAL_OPPORTUNITIES": 5153,
+        "SALES_REPS": 60,
+        "SUPPORT_CASES": 5285,
+        "SYSTEM_TELEMETRY_MONTHLY": 32260
+      },
+      "failures": [],
+      "seconds": 3,
+      "status": "ok",
+      "tables": [
+        "SUPPORT_CASES"
+      ]
+    },
+    "metrics_check": {
+      "at": "2026-10-13T00:23:12+00:00",
+      "count": 37,
+      "failures": [],
+      "status": "ok"
+    },
+    "publish.connection": {
+      "at": "2026-10-13T00:36:00+00:00",
+      "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+      "created": false,
+      "status": "ok"
+    },
+    "publish.database": {
+      "at": "2026-10-13T00:36:06+00:00",
+      "missing": [],
+      "status": "ok",
+      "tables": 21
+    },
+    "publish.documents": {
+      "at": "2026-10-13T04:11:05+00:00",
+      "dataset_id": "ET_DATASET_a5c2a5203cde4cf1af9102cf64ec395b",
+      "status": "ok",
+      "uploaded": 7
+    },
+    "publish.domain": {
+      "at": "2026-10-13T00:36:00+00:00",
+      "created": false,
+      "domain_id": "ET_DOMAIN_f6df7b3a5120419383a6babb46d0f65d",
+      "status": "ok"
+    },
+    "publish.extraction": {
+      "at": "2026-10-13T04:29:54+00:00",
+      "job_status": "JOB_RUN_STATUS_SUCCESS",
+      "run_id": "ET_JOB_RUN_a139c7d31965461199ac748c60a607e5",
+      "status": "ok",
+      "uploaded": 0
+    },
+    "publish.instructions": {
+      "at": "2026-10-13T00:36:08+00:00",
+      "chars": 5968,
+      "status": "ok"
+    },
+    "publish.knowledge": {
+      "added": 49,
+      "at": "2026-10-13T00:36:09+00:00",
+      "existing": 0,
+      "status": "ok",
+      "total": 49
+    },
+    "publish.lookup": {
+      "at": "2026-10-13T04:10:58+00:00",
+      "changed": 5,
+      "missing": [],
+      "status": "ok"
+    },
+    "publish.metrics": {
+      "at": "2026-10-13T04:10:43+00:00",
+      "created": [
+        "p1_cases",
+        "open_cases",
+        "avg_csat",
+        "bookings"
+      ],
+      "failed": [],
+      "status": "ok",
+      "total": 37
+    },
+    "publish.reviewed_queries": {
+      "added": 48,
+      "at": "2026-10-13T04:10:47+00:00",
+      "existing": 0,
+      "status": "ok",
+      "total": 48
+    },
+    "rq_check_snowflake": {
+      "at": "2026-10-13T00:23:31+00:00",
+      "count": 48,
+      "failures": 0,
+      "status": "ok"
+    },
+    "validate": {
+      "at": "2026-10-13T00:29:30+00:00",
+      "failed": 1,
+      "failures": [
+        "SUPPORT_CASES has 5,282 rows"
+      ],
+      "passed": 73,
+      "status": "failed"
+    },
+    "validate_snowflake": {
+      "at": "2026-10-13T00:30:10+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 74,
+      "status": "ok"
+    }
+  },
+  "wisdom": {
+    "agent_id": "AGENT_146c8d79-a16a-47b7-b3da-d8511b10e515",
+    "agent_name": "Renewal Risk Watch",
+    "app_conversation_id": "f897adbd-3dcf-46d1-b7ce-ea1a4b803171",
+    "app_id": "app_4c27c3346904444482aae6d66649c4b6",
+    "app_name": "Renewals and Installed Base Cockpit",
+    "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+    "conversations": [
+      {
+        "chars": 584,
+        "completed": true,
+        "id": "e8daec43-eb9c-409d-a0a9-ef43ba576350",
+        "question": "Which region's renewal rate has dropped the most this fiscal year and what is driving it and how much ARR is up for renewal there in the next 90 days?",
+        "score": 0.6
+      }
+    ],
+    "dataset_id": "ET_DATASET_a5c2a5203cde4cf1af9102cf64ec395b",
+    "domain_id": "ET_DOMAIN_f6df7b3a5120419383a6babb46d0f65d",
+    "eval_set_id": "88a08951-b850-4c98-b0f2-a4529051af35",
+    "extraction_accepted": {
+      "failed": 0,
+      "knowledge_and_synonyms": 93,
+      "knowledge_total": 120,
+      "pending_for_review": 105
+    },
+    "extraction_run_id": "ET_JOB_RUN_a139c7d31965461199ac748c60a607e5",
+    "followup_conversation_id": "e8daec43-eb9c-409d-a0a9-ef43ba576350",
+    "health_job_run_id": "ET_JOB_RUN_5b96c547fd4f4f2882e665dbc776c09c",
+    "last_eval_run_group_id": "ET_JOB_RUN_591deee0e18d4edebf38b30f97dc56c7",
+    "last_eval_run_id": "ET_JOB_RUN_30d00327c925406eaf18b119fe4be5ad",
+    "last_eval_run_scores": [
+      0.8958333333333334,
+      0.9375,
+      0.9375
+    ],
+    "last_score": 0.9236111111111112,
+    "metric_names": [
+      "avg_csat",
+      "bookings",
+      "open_cases",
+      "p1_cases"
+    ],
+    "uploaded_context_assets": [
+      "business_glossary_and_ownership.pdf",
+      "data_help_channel_export.pdf",
+      "data_platform_wiki_onboarding_notes.pdf",
+      "finance_metric_definitions_v3_2.pdf",
+      "installed_base_review_q1_fy27.pdf",
+      "lifecycle_bulletin_ks7000_eos.pdf",
+      "renewal_playbook_fy27.pdf"
+    ],
+    "uploaded_documents": [
+      "business_glossary_and_ownership.pdf",
+      "data_help_channel_export.pdf",
+      "data_platform_wiki_onboarding_notes.pdf",
+      "finance_metric_definitions_v3_2.pdf",
+      "installed_base_review_q1_fy27.pdf",
+      "lifecycle_bulletin_ks7000_eos.pdf",
+      "renewal_playbook_fy27.pdf"
+    ]
+  }
+}
