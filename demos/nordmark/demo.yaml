@@ -1,0 +1,271 @@
+name: nordmark
+title: Nordmark Dagligvaror
+vertical: Retail
+built_for: Axfood conversation via the Teradata partner team (Swedish grocery group; synthetic data in Snowflake, federated read-only Teradata sourcing tables; no prospect names appear in the data)
+as_of: 2026-09-30
+data_start: 2024-10-01
+seed: 20261026
+inputs: [inputs/ali_slack_notes.md, inputs/axfood_demo_brief_teradata.pdf, inputs/teradata_call_2026-10-27_transcript.md]
+
+persona:
+  primary: Head of Store Operations (group) with the FP&A business-analytics team
+  secondary: [Grosshallen banner director, Category manager Fresh & Produce, Loyalty and CRM lead, Data steward (Dagab-style analytics mart)]
+  kpis: [net sales and like-for-like growth, gross profit and margin percent, transactions and average basket, on-shelf availability and stockouts, waste and markdowns, active loyalty members and visit frequency, sales versus catchment potential]
+
+snowflake:
+  database: NORDMARK_POC
+  schema: ANALYTICS
+  ddl: 01_snowflake_ddl.sql
+  load_order: [CALENDAR, BANNERS, NEIGHBORHOODS, STORES, PRODUCT_CATEGORIES, NONFOOD_ASSORTMENT, PROMOTIONS,
+               STORE_DAILY_SALES, SALES_WEEKLY_STORE_CATEGORY, STORE_MONTHLY_COSTS, PROMOTION_RESULTS,
+               LOYALTY_ACTIVITY_MONTHLY, STORE_ASSORTMENT_MONTHLY, COMPETITOR_EVENTS, NONFOOD_AVAILABILITY_MONTHLY,
+               ARTIKEL, KAMPANJ, ARTIKEL_KOSTNAD_MANAD, KAMPANJ_ARTIKEL_VECKA, KAMPANJ_BUTIK_VECKA,
+               DATA_DICTIONARY]
+  views: [V_KPI_STORE_MONTHLY, V_BANNER_KPI_MONTHLY, V_STORE_GAP_DECOMPOSITION, V_PEER_COMPARISON, V_CATCHMENT_POTENTIAL,
+          V_PROMO_EFFECTIVENESS, V_AVAILABILITY_VS_SALES, V_LOYALTY_SEGMENT_TRENDS, V_NONFOOD_AVAILABILITY_BY_SUPPLIER,
+          V_KAMPANJRAPPORT, V_PROGNOSFEL_TAKTIK, V_KAMPANJ_BUTIK_AVVIKELSE, V_KAMPANJ_MARGINALEFFEKT, V_KAMPANJ_KOMMANDE]
+  expected_rows:
+    CALENDAR: 822
+    BANNERS: 3
+    NEIGHBORHOODS: 249
+    STORES: 249
+    PRODUCT_CATEGORIES: 23
+    NONFOOD_ASSORTMENT: 250
+    PROMOTIONS: 60
+    STORE_DAILY_SALES: 175806
+    SALES_WEEKLY_STORE_CATEGORY: 453930
+    STORE_MONTHLY_COSTS: 5787
+    PROMOTION_RESULTS: 5260
+    LOYALTY_ACTIVITY_MONTHLY: 34722
+    STORE_ASSORTMENT_MONTHLY: 103845
+    COMPETITOR_EVENTS: 73
+    NONFOOD_AVAILABILITY_MONTHLY: 199250
+    ARTIKEL: 1200
+    KAMPANJ: 150
+    ARTIKEL_KOSTNAD_MANAD: 31200
+    KAMPANJ_ARTIKEL_VECKA: 7327
+    KAMPANJ_BUTIK_VECKA: 15364
+    DATA_DICTIONARY: 41
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    GROUP_NAME: Nordmark Dagligvaror
+    BANNER_DISCOUNT: Kronmat
+    BANNER_NEIGHBOURHOOD: Torghallen
+    BANNER_HYPERMARKET: Grosshallen
+    HYPERMARKET_ACQUIRED: 2025-01-01
+    HERO_STORE: Grosshallen Västerhamn
+    PEER_STORE: Grosshallen Nordstaden
+    CONVERTED_STORE: Grosshallen Sundsvik
+    CONVERTED_ON: 2026-08-15
+    HERO_PROMOTION: Sommarpris 2026
+    HERO_CATEGORY: Fresh & Produce
+    COMPETITOR_NAME: Billigmat
+    COMPETITOR_OPENED: 2026-03-12
+    COMPETITOR_DISTANCE_KM: 1.1
+    HERO_SEGMENT: Families
+    VAT_CUT_DATE: 2026-04-01
+    LATE_SUPPLIER_COUNT: 3
+    NONFOOD_SKU_COUNT: 250
+    HERO_CAMPAIGN_WEEK: 2026-W36
+    HERO_CAMPAIGN: "Höstskörd 3 för 2"
+    HERO_TACTIC: "Multiköp 3 för 2"
+    DRAFT_CAMPAIGN: "Äpplen & Päron"
+    DRAFT_WEEK: 2026-W42
+
+control_points:
+  - id: CP1
+    name: "Grosshallen like-for-like lags the group and the gap is transactions not basket; Västerhamn sells far below its catchment potential"
+    hero: Grosshallen Västerhamn
+    targets:
+      - {metric: grosshallen_lfl_r12_pct, op: "<=", value: -0.010}
+      - {metric: group_lfl_minus_grosshallen_pts, op: ">=", value: 0.025}
+      - {metric: grosshallen_transactions_change_pct, op: "<=", value: -0.050}
+      - {metric: grosshallen_basket_change_pct, op: ">=", value: 0.030}
+      - {metric: grosshallen_gp_pct_gap_vs_kronmat_pts, op: ">=", value: 0.020}
+      - {metric: grosshallen_ebit_q3_2026_sek, op: ">=", value: 0}
+      - {metric: grosshallen_ebit_q3_2025_sek, op: "<=", value: -5000000}
+      - {metric: vasterhamn_potential_index, op: "<=", value: 0.65}
+      - {metric: vasterhamn_cluster_median_index, op: ">=", value: 0.85}
+      - {metric: vasterhamn_is_largest_sek_gap_in_banner, op: "==", value: 1}
+  - id: CP2
+    name: "Kronmat Fresh & Produce grows while its margin erodes; Sommarpris 2026 has top uplift and bottom margin"
+    hero: Sommarpris 2026
+    targets:
+      - {metric: kronmat_fresh_sales_growth_pct, op: ">=", value: 0.07}
+      - {metric: kronmat_fresh_gp_pct_change_pts, op: "<=", value: -0.018}
+      - {metric: sommarpris_uplift_rank, op: "<=", value: 3}
+      - {metric: sommarpris_margin_rank_from_bottom, op: "<=", value: 3}
+  - id: CP3
+    name: "Dairy and Bread availability below 94 percent lines up with weaker like-for-like; Västerhamn has the worst availability in its banner"
+    hero: Grosshallen Västerhamn
+    targets:
+      - {metric: low_osa_lfl_gap_pts, op: ">=", value: 0.03}
+      - {metric: vasterhamn_osa_dairy_bread_pct, op: "<=", value: 0.915}
+      - {metric: vasterhamn_is_worst_osa_in_banner, op: "==", value: 1}
+  - id: CP4
+    name: "Families visit Grosshallen less while other banners hold; a discount competitor opened 1.1 km from Västerhamn"
+    hero: Families
+    targets:
+      - {metric: grosshallen_families_visits_change_pct, op: "<=", value: -0.10}
+      - {metric: other_banners_families_vs_total_visits_gap_pts, op: "<=", value: 0.03}   # Families move with total visits elsewhere
+      - {metric: vasterhamn_competitor_distance_km, op: "<=", value: 1.5}
+      - {metric: vasterhamn_sales_change_after_opening_pct, op: "<=", value: -0.06}
+  - id: CP5
+    name: "Peer store Nordstaden shows the playbook: higher private label share better availability and fewer markdowns"
+    hero: Grosshallen Nordstaden
+    targets:
+      - {metric: nordstaden_pl_share_minus_vasterhamn_pts, op: ">=", value: 0.05}
+      - {metric: nordstaden_osa_pct, op: ">=", value: 0.965}
+      - {metric: nordstaden_markdown_rate_ratio_vs_vasterhamn, op: "<=", value: 0.75}
+      - {metric: nordstaden_potential_index, op: ">=", value: 0.95}
+  - id: CP6
+    name: "Grosshallen non-food lost sales concentrate in SKUs from the three import suppliers whose purchase orders run late in the Teradata purchasing platform"
+    hero: Grosshallen Västerhamn
+    targets:
+      - {metric: late_supplier_share_of_nonfood_lost_sales, op: ">=", value: 0.55}
+      - {metric: late_supplier_count, op: "==", value: 3}
+      - {metric: vasterhamn_nonfood_osa_pct, op: "<=", value: 0.93}
+  - id: CP7
+    name: "Kampanjrapport recreates the MicroStrategy grid for Kronmat week 2026-W36: the chain purchase forecast lands 18 percent over actual and CatBoost 6 percent"
+    hero: "Höstskörd 3 för 2"
+    targets:
+      - {metric: kronmat_w36_rows, op: "==", value: 28}
+      - {metric: kronmat_w36_tactic_types, op: ">=", value: 4}
+      - {metric: kronmat_w36_nyckel_unique, op: "==", value: 1}
+      - {metric: kronmat_w36_kedjan_bias_pct, op: ">=", value: 0.15}
+      - {metric: kronmat_w36_kedjan_bias_pct_max, op: "<=", value: 0.22}
+      - {metric: kronmat_w36_catboost_bias_pct, op: "<=", value: 0.09}
+  - id: CP8
+    name: "Forecast error is highest on Multiköp perishables and worst at Grosshallen Västerhamn after the competitor opening; Nordstaden is in the best quartile"
+    hero: "Multiköp 3 för 2"
+    targets:
+      - {metric: multikop_perishable_bias_pct, op: ">=", value: 0.25}
+      - {metric: other_tactics_max_bias_pct, op: "<=", value: 0.10}
+      - {metric: perishable_share_of_abs_error, op: ">=", value: 0.60}
+      - {metric: vasterhamn_overforecast_after_opening_pct, op: ">=", value: 0.35}
+      - {metric: vasterhamn_is_worst_grosshallen_store, op: "==", value: 1}
+      - {metric: nordstaden_in_best_quartile, op: "==", value: 1}
+  - id: CP9
+    name: "Over-forecasting costs margin on the illustrative cost data: SEK 9-15 m in Q3 2026 mostly perishable waste with Kronmat Multiköp the largest share"
+    hero: Kronmat
+    targets:
+      - {metric: q3_2026_marginaleffekt_sek, op: ">=", value: 9000000}
+      - {metric: q3_2026_marginaleffekt_sek_max, op: "<=", value: 15000000}
+      - {metric: q3_2026_perishable_waste_share, op: ">=", value: 0.55}
+      - {metric: kronmat_multikop_is_largest_share, op: "==", value: 1}
+  - id: CP10
+    name: "Upcoming perishable campaigns whose chain forecast exceeds CatBoost by more than 15 percent are flagged before delivery"
+    hero: "Äpplen & Päron"
+    targets:
+      - {metric: upcoming_perishable_campaigns_flagged, op: ">=", value: 3}
+      - {metric: upcoming_dry_rows_flagged, op: "<=", value: 1}
+  - id: CP11
+    name: "The order adjustment draft for Äpplen & Päron week 2026-W42 cuts the purchase 15-22 percent in whole layers and protects at least SEK 300k of margin"
+    hero: "Äpplen & Päron"
+    targets:
+      - {metric: applen_paron_w42_flagged, op: "==", value: 1}
+      - {metric: applen_paron_w42_cut_pct, op: ">=", value: 0.15}
+      - {metric: applen_paron_w42_cut_pct_max, op: "<=", value: 0.22}
+      - {metric: applen_paron_w42_skyddad_marginal_sek, op: ">=", value: 300000}
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+documents:
+  - {spec: docs/grosshallen_turnaround_memo_q3_2026.md, kind: memo}
+  - {spec: docs/store_review_playbook.md, kind: playbook}
+
+context_assets:
+  - {spec: docs/retail_metric_definitions_standard_v4.md, kind: standard}
+  - {spec: docs/business_glossary_and_ownership.md, kind: glossary}
+  - {spec: docs/data_platform_wiki_store_analytics.md, kind: wiki}
+  - {spec: docs/store_ops_analytics_channel_export.md, kind: chat_export}
+  - {spec: docs/grosshallen_turnaround_memo_q3_2026.md, kind: memo}
+  - {spec: docs/sommarpris_2026_post_mortem.md, kind: memo}
+  - {spec: docs/store_review_playbook.md, kind: playbook}
+  - {spec: docs/nordmark_dbql_export_2026-05.sql, kind: query_log}            # Revision 2: shaped like a Teradata DBQL export (the build-walkthrough beat)
+  - {spec: docs/kampanjrapport_report_definition.txt, kind: report_definition}  # Revision 2: MicroStrategy-style report export
+  - {spec: docs/campaign_planning_runbook.md, kind: runbook}                   # Revision 2: the planners' procedures -> skills via the SKILL agent
+
+live_apps:
+  - name: Store Performance Cockpit
+    prompt: live_app_prompt.md
+    tabs: [Executive Overview, Store Gap Lab, Implementation Plan]
+  - name: Kampanjrapport
+    key: kampanjrapport
+    prompt: live_app_prompt_kampanjrapport.md
+    tabs: [Rapporten, Förklara och kostnad, Orderjustering]
+
+chats:
+  - followup_question: Why is Grosshallen Västerhamn underperforming its catchment potential and are late inbound purchase orders from the import suppliers part of its non-food availability problem?
+    expected_points:
+      - Västerhamn sells roughly 62 percent of its catchment potential versus about 90 percent for its peer cluster
+      - the gap is driven by fewer transactions rather than smaller baskets
+      - Dairy and Bread on-shelf availability is the worst in the banner at about 91 percent
+      - Families segment visits fell more than 10 percent and the Billigmat discount store opened 1.1 km away in March 2026
+      - non-food lost sales concentrate in SKUs from three import suppliers whose purchase orders arrive late (named from the Teradata purchasing data)
+      - Grosshallen Nordstaden is the peer playbook with higher private label share better availability and fewer markdowns
+  - name: kampanjrapport skill
+    key: kampanjrapport
+    followup_question: /kampanjrapport Kronmat 2026-W36
+    expected_points:
+      - 28 article rows across four Kronmat campaigns in week 2026-W36 (Höstskörd)
+      - actual sold about 615 thousand units with the chain purchase forecast about 18 percent over and CatBoost about 6 percent over
+      - Multiköp 3 för 2 has the largest chain-forecast bias of the tactic types that week
+  - name: explain and cost
+    key: explain_cost
+    followup_question: Why is forecast error highest on Multiköp 3 för 2 campaigns over the last 13 campaign weeks and what did the over-forecast cost us in margin in Q3 2026?
+    expected_points:
+      - the chain purchase forecast over-forecasts Multiköp 3 för 2 perishables by about 31 percent while other tactic types stay within about 9 percent
+      - perishables carry most of the absolute forecast error (about 87 percent)
+      - Grosshallen Västerhamn is the worst store on campaign forecast deviation and its deviation jumped after the Billigmat opening in March 2026
+      - over-forecasting cost about SEK 10.8 million of margin in Q3 2026 mostly as perishable waste with Kronmat Multiköp the largest share
+      - the cost figures are labelled illustrative because the finance system is not migrated
+      - a recommendation to cap the chain plan at the CatBoost forecast on perishable multibuy campaigns or review the flagged upcoming campaigns
+
+agents:
+  - name: "Grosshallen Store Watch"
+    prompt: agent_prompt.md
+    enabled: false
+  - name: "Kampanjprognos-vakt"
+    key: kampanjprognos
+    prompt: agent_prompt_kampanjprognos.md
+    enabled: false
+
+wisdom:
+  deployment: proddemo
+  workspace_id: ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024   # Default Organization: the Ali-TD Teradata connection lives here
+  connection: {name: Snowflake Demo, create: false}            # existing shared connection (user WISDOMAI_PROD); NORDMARK_POC added to its filter by hand
+  federated_sources:
+    - connection: Ali-TD                                        # read-only Teradata (Ali Alladin); never created, updated or refreshed by the pipeline
+      database: wisdomai
+      dialect: teradata
+      tables: [RTL_DIM_SUPPLIER, RTL_DIM_PRODUCT, RTL_FACT_PURCHASE_ORDER_LINE, RTL_VW_PURCHASE_ORDER]
+      description: Grosshallen's inherited import-purchasing platform on Teradata — suppliers, the imported non-food SKU master and inbound purchase-order lines (ordered and received quantities and days late). Join to NORDMARK_POC.ANALYTICS.NONFOOD_ASSORTMENT and NONFOOD_AVAILABILITY_MONTHLY on PRODUCT_KEY and SUPPLIER_KEY.
+  domain_name: Nordmark Dagligvaror
+  domain_description: Fictional Swedish grocery group (banners Kronmat discount, Torghallen neighbourhood, Grosshallen hypermarket acquired January 2025). Demo today is 2026-09-30; data spans 2024-10-01 to 2026-09-30. Store POS mart in Snowflake NORDMARK_POC.ANALYTICS; Grosshallen import purchasing (suppliers and purchase orders) federated read-only from Teradata (wisdomai.RTL_*).
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by:
+  lookup_columns: [STORES.STORE_NAME, STORES.BANNER, STORES.REGION, NEIGHBORHOODS.CATCHMENT_TYPE, PRODUCT_CATEGORIES.CATEGORY_NAME, PROMOTIONS.PROMOTION_NAME, LOYALTY_ACTIVITY_MONTHLY.SEGMENT, KAMPANJ.KAMPANJ_NAMN, KAMPANJ.TAKTIK_TYP, KAMPANJ.KEDJA, ARTIKEL.ARTIKEL_NAMN, ARTIKEL.KATEGORI]
+  eval: {run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}
+  context_mode: extractor
+  extraction: {accept: [knowledge, synonyms, metrics, reviewed_queries, skills], coverage_threshold: 0.9, batch_size: 3}
+  skills:                                                       # Revision 2: codified procedures so the same question returns the same grid (extractor first, direct create as fallback)
+    - {file: skills/kampanjrapport.md}
+    - {file: skills/prognosavvikelse.md}
+    - {file: skills/orderjustering-utkast.md}
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md
+
+manual_steps:
+  - Add NORDMARK_POC to the database filter of the "Snowflake Demo" connection in Default Organization (browser, not the pipeline), then refresh the connection.

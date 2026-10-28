@@ -1,0 +1,150 @@
+name: harborline
+title: Harborline Private Capital
+vertical: Fin Serv
+built_for: State Street Data Intelligence conversation (Head of Product Development); advanced-analytics SKU for allocator clients; no prospect names appear anywhere in the demo
+as_of: 2026-10-15
+data_start: 2012-01-01
+seed: 20261015
+inputs: [inputs/call_transcript_2026-10-15.md, inputs/ae_instructions.md]
+
+persona:
+  primary: Head of Product Development at a private-capital benchmark and index provider (the demo is shown to him; the Live App is built for his allocator clients)
+  secondary: [Allocator portfolio analyst (pension or endowment), Index research quant, Fund data operations lead]
+  kpis: [time from a client request to a configured custom index view, index coverage (funds and vintages), extraction accuracy on fund quarterly reports, premium analytics tier attach rate, analyst hours per client request]
+
+snowflake:
+  database: HARBORLINE_POC
+  schema: ANALYTICS
+  ddl: 01_snowflake_ddl.sql
+  load_order: [MANAGERS, BENCHMARKS, FUNDS, ALLOCATORS, ALLOCATOR_COMMITMENTS,
+               FUND_QUARTERLY_NAV, FUND_CASH_FLOWS, BENCHMARK_QUARTERLY, FUND_REPORT_EXTRACTS,
+               DATA_DICTIONARY]
+  views: [V_FUND_PERFORMANCE_QUARTERLY, V_FUND_PERFORMANCE_LATEST, V_COHORT_INDEX_QUARTERLY,
+          V_BENCHMARK_QUARTERLY, V_CASH_FLOW_PACING_QUARTERLY, V_SUBSCRIPTION_LINE_IRR_GAP,
+          V_ALLOCATOR_HOLDINGS, V_ALLOCATOR_VINTAGE_VS_BENCHMARK, V_REPORT_EXTRACTION_RECONCILIATION]
+  expected_rows:
+    ALLOCATORS: 5
+    ALLOCATOR_COMMITMENTS: 156
+    BENCHMARKS: 12
+    BENCHMARK_QUARTERLY: 4858
+    DATA_DICTIONARY: 91
+    FUNDS: 377
+    FUND_CASH_FLOWS: 28861
+    FUND_QUARTERLY_NAV: 12141
+    FUND_REPORT_EXTRACTS: 711
+    MANAGERS: 116
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    LATEST_QUARTER: 2026-06-30
+    HERO_FUND_ID: FND-0117
+    HERO_FUND_NAME: Calder Ridge Capital Partners IV
+    HERO_MANAGER: Calder Ridge Capital
+    HERO_VINTAGE: 2018
+    HERO_FUND_SIZE_USD_M: 3200
+    HERO_LINE_LIMIT_USD_M: 400
+    HERO_LINE_BALANCE_Q2_2026_USD_M: 210
+    HERO_NAV_Q2_2026_USD_M: 2614
+    HERO_CALLED_Q2_2026_USD_M: 2880
+    HERO_DISTRIBUTED_Q2_2026_USD_M: 1152
+    HERO_IRR_Q2_2026_PCT: 18.4
+    HERO_ALLOCATOR_ID: ALC-001
+    HERO_ALLOCATOR_NAME: Westbrook State Retirement System
+    HERO_ALLOCATOR_LAGGING_VINTAGE: 2018
+    BROAD_PE_BENCHMARK_ID: HPCI-BROAD-PE
+    COHORT_VINTAGES: 2015-2020
+    COHORT_STRATEGY: Buyout
+    COHORT_REGION: North America
+
+control_points:
+  - id: CP1
+    name: "Custom index: North American buyout funds of vintages 2015-2020 beat the Harborline Broad Private Equity Index; mid-market beats mega"
+    hero: NA buyout 2015-2020 cohort vs HPCI-BROAD-PE
+    targets:
+      - {metric: cohort_fund_count, op: ">=", value: 40}
+      - {metric: cohort_median_irr_minus_broad_index_pts, op: ">=", value: 2.0}
+      - {metric: cohort_median_irr_minus_broad_index_pts, op: "<=", value: 4.5}
+      - {metric: mid_market_minus_mega_irr_pts, op: ">=", value: 2.0}
+  - id: CP2
+    name: "Subscription lines flatter early IRR; the gap closes with age; Calder Ridge IV matches its Q2 2026 quarterly report"
+    hero: Calder Ridge Capital Partners IV
+    targets:
+      - {metric: young_vintage_line_irr_gap_at_8q_pts, op: ">=", value: 3.0}
+      - {metric: mature_vintage_line_irr_gap_latest_pts, op: "<=", value: 1.5}
+      - {metric: hero_nav_q2_2026, op: "==", value: 2614}
+      - {metric: hero_line_balance_q2_2026, op: "==", value: 210}
+      - {metric: hero_extract_matches_nav, op: "==", value: 1}
+  - id: CP3
+    name: "Distribution drought: 2021-2022 vintages return capital far more slowly than 2014-2016 vintages did at the same age"
+    hero: 2021-2022 vintages
+    targets:
+      - {metric: dpi_at_16q_vintages_2021_2022, op: "<=", value: 0.30}
+      - {metric: dpi_at_16q_vintages_2014_2016, op: ">=", value: 0.55}
+      - {metric: h1_2026_distributions_vs_h1_2021_change, op: "<=", value: -0.25}
+  - id: CP4
+    name: "Westbrook State Retirement System's 2018 vintage sleeve lags its matching benchmarks because of two venture funds"
+    hero: Westbrook State Retirement System
+    targets:
+      - {metric: westbrook_2018_gap_pts, op: "<=", value: -2.0}
+      - {metric: westbrook_2018_venture_funds_below_8pts, op: "==", value: 2}
+      - {metric: westbrook_other_vintages_min_gap_pts, op: ">=", value: -1.5}
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+# Story document: rendered to PDF and attached to the domain for chat (the extraction beat).
+documents:
+  - {spec: docs/calder_ridge_iv_q2_2026_quarterly_report.md, kind: report}
+
+# Authored assets for the context extractor (the only way context enters the domain).
+context_assets:
+  - {spec: docs/harborline_index_methodology_and_metric_definitions_v2_1.md, kind: standard}
+  - {spec: docs/business_glossary_and_data_ownership_register.md, kind: glossary}
+  - {spec: docs/data_platform_wiki_harborline_poc_onboarding.md, kind: wiki}
+  - {spec: docs/index_desk_channel_export.md, kind: chat_export}
+  - {spec: docs/calder_ridge_iv_q2_2026_quarterly_report.md, kind: report}
+
+live_app:
+  name: Custom Index Studio
+  prompt: live_app_prompt.md
+  tabs: [Index Builder, Fund Size Split, Cash-Flow Pacing]
+
+chat:
+  followup_question: Compare Westbrook State Retirement System's commitments by vintage year to the matching Harborline benchmarks and tell me which vintage lags the most and which funds explain the gap
+  expected_points:
+    - the 2018 vintage lags the most
+    - 2018 sleeve is more than 2 points below its matching benchmarks
+    - two venture funds explain the gap
+    - the other vintages are at or above benchmark
+
+agent:
+  name: Subscription Line Watch
+  prompt: agent_prompt.md
+  enabled: false
+
+wisdom:
+  deployment: proddemo
+  workspace_id: ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024   # Default Organization (user's choice 2026-10-15; not Certified Demos)
+  connection: {name: Snowflake Demo}                           # existing shared connection; HARBORLINE_POC added to its filter by hand in the browser
+  domain_name: Harborline Private Capital
+  domain_description: Fictional producer of private-capital benchmarks and indices (the Harborline Private Capital Index family). Fund cash flows NAVs vintages strategies regions subscription credit lines allocator commitments and figures extracted from fund quarterly reports. Demo today is 2026-10-15; the latest reported quarter is Q2 2026 (2026-06-30); data spans 2012-01-01 to 2026-06-30. Snowflake HARBORLINE_POC.ANALYTICS.
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by:
+  lookup_columns: [FUNDS.FUND_NAME, MANAGERS.MANAGER_NAME, BENCHMARKS.BENCHMARK_NAME, ALLOCATORS.ALLOCATOR_NAME, FUNDS.STRATEGY, FUNDS.REGION]
+  eval: {name: Harborline reviewed queries, run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}
+  context_mode: extractor
+  extraction: {accept: [knowledge, synonyms, metrics, reviewed_queries], coverage_threshold: 0.9, batch_size: 3}
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md
+
+manual_steps:
+  - Add HARBORLINE_POC to the database filter of the "Snowflake Demo" connection in Default Organization (done in the browser during the build, never by the pipeline).

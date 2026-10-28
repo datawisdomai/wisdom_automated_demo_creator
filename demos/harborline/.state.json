@@ -1,0 +1,353 @@
+{
+  "snowflake": {
+    "database": "HARBORLINE_POC",
+    "schema": "ANALYTICS"
+  },
+  "steps": {
+    "agent": {
+      "agent_id": "AGENT_286770aa-a5fc-41db-9b3e-e522f7a97ae1",
+      "at": "2026-10-16T02:15:50+00:00",
+      "is_draft": true,
+      "nodes": 8,
+      "status": "ok"
+    },
+    "app": {
+      "app_id": "app_cda547e0db5a4719bc27f597afa9161d",
+      "at": "2026-10-16T02:13:05+00:00",
+      "conversation_id": "8fdc1f09-ff5a-4e0b-a76d-35dea6af3aaa",
+      "live_spec_version": 2,
+      "seconds": 576.6,
+      "status": "ok"
+    },
+    "chat": {
+      "at": "2026-10-16T02:16:35+00:00",
+      "completed": true,
+      "conversation_id": "ac368c43-b2b6-4369-8284-7a2f1db7b2f0",
+      "score": 1.0,
+      "seconds": 107.2,
+      "status": "ok"
+    },
+    "ddl": {
+      "at": "2026-10-16T01:30:35+00:00",
+      "seconds": 12,
+      "statements": 24,
+      "status": "ok"
+    },
+    "docs": {
+      "at": "2026-10-16T01:43:14+00:00",
+      "failures": [],
+      "generated": 0,
+      "rendered": [
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/harborline/build/docs/calder_ridge_iv_q2_2026_quarterly_report.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/harborline/build/docs/harborline_index_methodology_and_metric_definitions_v2_1.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/harborline/build/docs/business_glossary_and_data_ownership_register.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/harborline/build/docs/data_platform_wiki_harborline_poc_onboarding.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/harborline/build/docs/index_desk_channel_export.pdf"
+      ],
+      "status": "ok"
+    },
+    "eval": {
+      "at": "2026-10-16T02:13:17+00:00",
+      "consistently_failing": 2,
+      "consistently_passing": 29,
+      "flaky": 2,
+      "passed": 31,
+      "run_group_id": "ET_JOB_RUN_5c90cefc7d09490a8d39fa5c99686f78",
+      "run_id": "ET_JOB_RUN_c1c23f9b11a744d993386c812452a573",
+      "run_ids": [
+        "ET_JOB_RUN_2a046d8d6547409dbdd985908425f3f4",
+        "ET_JOB_RUN_5cb0beeb46dc4621939bfdc6f4811f93",
+        "ET_JOB_RUN_c1c23f9b11a744d993386c812452a573"
+      ],
+      "run_scores": [
+        0.9393939393939394,
+        0.8787878787878788,
+        0.9393939393939394
+      ],
+      "score": 0.9191919191919192,
+      "status": "ok",
+      "total": 33
+    },
+    "generate": {
+      "at": "2026-10-16T01:36:20+00:00",
+      "counts": {
+        "ALLOCATORS": 5,
+        "ALLOCATOR_COMMITMENTS": 156,
+        "BENCHMARKS": 12,
+        "BENCHMARK_QUARTERLY": 4858,
+        "DATA_DICTIONARY": 91,
+        "FUNDS": 377,
+        "FUND_CASH_FLOWS": 28861,
+        "FUND_QUARTERLY_NAV": 12141,
+        "FUND_REPORT_EXTRACTS": 711,
+        "MANAGERS": 116
+      },
+      "mismatches": [],
+      "missing": [],
+      "schema_errors": [],
+      "seconds": 2,
+      "status": "ok"
+    },
+    "grants": {
+      "at": "2026-10-16T01:30:38+00:00",
+      "seconds": 2,
+      "statements": 7,
+      "status": "ok"
+    },
+    "health": {
+      "analysis_status": "RUNNING",
+      "at": "2026-10-16T02:17:45+00:00",
+      "quick_check_job": "ET_JOB_RUN_a01648479dc1402195a23c39aa18f3c9",
+      "status": "ok",
+      "trigger": {
+        "evalRunId": null,
+        "message": "Analysis started.",
+        "runGroupId": null,
+        "status": "STARTED"
+      }
+    },
+    "load": {
+      "at": "2026-10-16T01:35:12+00:00",
+      "counts": {
+        "ALLOCATORS": 5,
+        "ALLOCATOR_COMMITMENTS": 156,
+        "BENCHMARKS": 12,
+        "BENCHMARK_QUARTERLY": 4858,
+        "DATA_DICTIONARY": 91,
+        "FUNDS": 377,
+        "FUND_CASH_FLOWS": 28861,
+        "FUND_QUARTERLY_NAV": 12141,
+        "FUND_REPORT_EXTRACTS": 711,
+        "MANAGERS": 116
+      },
+      "failures": [],
+      "seconds": 32,
+      "status": "ok",
+      "tables": [
+        "MANAGERS",
+        "BENCHMARKS",
+        "FUNDS",
+        "ALLOCATORS",
+        "ALLOCATOR_COMMITMENTS",
+        "FUND_QUARTERLY_NAV",
+        "FUND_CASH_FLOWS",
+        "BENCHMARK_QUARTERLY",
+        "FUND_REPORT_EXTRACTS",
+        "DATA_DICTIONARY"
+      ]
+    },
+    "metrics_check": {
+      "at": "2026-10-16T01:38:30+00:00",
+      "count": 29,
+      "failures": [],
+      "status": "ok"
+    },
+    "publish.connection": {
+      "at": "2026-10-16T01:46:13+00:00",
+      "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+      "created": false,
+      "status": "ok"
+    },
+    "publish.database": {
+      "at": "2026-10-16T01:48:04+00:00",
+      "missing": [],
+      "status": "ok",
+      "tables": 19
+    },
+    "publish.documents": {
+      "at": "2026-10-16T01:48:22+00:00",
+      "dataset_id": "ET_DATASET_b4e1f03cec864905b930bbf97971d09c",
+      "status": "ok",
+      "uploaded": 5
+    },
+    "publish.domain": {
+      "at": "2026-10-16T01:46:13+00:00",
+      "created": false,
+      "domain_id": "ET_DOMAIN_89571564869a4aabaf43849235f7ee4e",
+      "status": "ok"
+    },
+    "publish.extraction": {
+      "accepted": {
+        "accepted": 304,
+        "by_family": {
+          "descriptions": 288,
+          "knowledge": 131,
+          "metrics": 39,
+          "reviewed_queries": 55,
+          "synonyms": 96
+        },
+        "errors": [
+          "Synonym set already exists for proposed name or id: RVPI",
+          "Synonym set already exists for proposed name or id: Subscription credit line",
+          "Synonym set already exists for proposed name or id: Allocator",
+          "Synonym set already exists for proposed name or id: TVPI",
+          "Synonym set already exists for proposed name or id: TVPI"
+        ],
+        "failed": 17,
+        "left_pending": 305,
+        "pending_before": 609
+      },
+      "at": "2026-10-16T02:03:11+00:00",
+      "coverage": {
+        "knowledge": {
+          "in_domain": 131,
+          "story_facts": 22
+        },
+        "metrics": {
+          "coverage": 1.0,
+          "expected": 29,
+          "found": 29,
+          "in_domain": 39,
+          "missing": []
+        },
+        "reviewed_queries": {
+          "coverage": 0.962,
+          "expected": 26,
+          "found": 25,
+          "in_domain": 53,
+          "missing": [
+            "Compare Westbrook State Retirement System's commitments by vintage year to the matching Harborline benchmarks and tell me which vintage lags the most and which funds explain the gap"
+          ]
+        }
+      },
+      "job_status": "JOB_RUN_STATUS_SUCCESS",
+      "run_id": "ET_JOB_RUN_f554bea04b1945cd8e1b6488dc80838e",
+      "status": "ok",
+      "uploaded": 8
+    },
+    "publish.instructions": {
+      "at": "2026-10-16T01:48:05+00:00",
+      "chars": 4022,
+      "status": "ok"
+    },
+    "publish.lookup": {
+      "at": "2026-10-16T01:48:16+00:00",
+      "changed": 6,
+      "missing": [],
+      "status": "ok"
+    },
+    "publish.s3_dataset": {
+      "at": "2026-10-16T02:03:11+00:00",
+      "attached": false,
+      "status": "ok"
+    },
+    "rq_check_snowflake": {
+      "at": "2026-10-16T01:38:29+00:00",
+      "count": 33,
+      "failures": 0,
+      "status": "ok"
+    },
+    "validate": {
+      "at": "2026-10-16T01:34:38+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 61,
+      "status": "ok"
+    },
+    "validate_snowflake": {
+      "at": "2026-10-16T01:35:30+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 61,
+      "status": "ok"
+    }
+  },
+  "wisdom": {
+    "agent_id": "AGENT_286770aa-a5fc-41db-9b3e-e522f7a97ae1",
+    "agent_name": "Subscription Line Watch",
+    "app_conversation_id": "8fdc1f09-ff5a-4e0b-a76d-35dea6af3aaa",
+    "app_id": "app_cda547e0db5a4719bc27f597afa9161d",
+    "app_name": "Custom Index Studio",
+    "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+    "conversations": [
+      {
+        "chars": 777,
+        "completed": true,
+        "id": "ac368c43-b2b6-4369-8284-7a2f1db7b2f0",
+        "question": "Compare Westbrook State Retirement System's commitments by vintage year to the matching Harborline benchmarks and tell me which vintage lags the most and which funds explain the gap",
+        "score": 1.0
+      }
+    ],
+    "dataset_id": "ET_DATASET_b4e1f03cec864905b930bbf97971d09c",
+    "domain_id": "ET_DOMAIN_89571564869a4aabaf43849235f7ee4e",
+    "eval_set_id": "d93329a4-9a55-44ea-a998-c166a3bfb794",
+    "extraction_coverage": {
+      "knowledge": {
+        "in_domain": 131,
+        "story_facts": 22
+      },
+      "metrics": {
+        "coverage": 1.0,
+        "expected": 29,
+        "found": 29,
+        "in_domain": 39,
+        "missing": []
+      },
+      "reviewed_queries": {
+        "coverage": 0.962,
+        "expected": 26,
+        "found": 25,
+        "in_domain": 53,
+        "missing": [
+          "Compare Westbrook State Retirement System's commitments by vintage year to the matching Harborline benchmarks and tell me which vintage lags the most and which funds explain the gap"
+        ]
+      }
+    },
+    "extraction_run_id": "ET_JOB_RUN_f554bea04b1945cd8e1b6488dc80838e",
+    "extraction_runs": {
+      "ET_JOB_RUN_8e04fa141b884a05841edd2a89cba139": {
+        "files": [
+          "harborline_semantic_models.yml",
+          "harborline_certified_queries.sql",
+          "harborline_analyst_handbook.txt"
+        ]
+      },
+      "ET_JOB_RUN_a205b56d0d6648c985c60971a1d4a308": {
+        "files": [
+          "harborline_index_methodology_and_metric_definitions_v2_1.pdf",
+          "business_glossary_and_data_ownership_register.pdf",
+          "data_platform_wiki_harborline_poc_onboarding.pdf"
+        ]
+      },
+      "ET_JOB_RUN_f554bea04b1945cd8e1b6488dc80838e": {
+        "files": [
+          "index_desk_channel_export.pdf",
+          "calder_ridge_iv_q2_2026_quarterly_report.pdf"
+        ]
+      }
+    },
+    "extraction_uploaded": {
+      "business_glossary_and_data_ownership_register.pdf": "fb4818557245c386",
+      "calder_ridge_iv_q2_2026_quarterly_report.pdf": "434afb7f7058b07c",
+      "data_platform_wiki_harborline_poc_onboarding.pdf": "eab81cddd786925a",
+      "harborline_analyst_handbook.txt": "03308b47d6c08667",
+      "harborline_certified_queries.sql": "9ebbf660de371d6a",
+      "harborline_index_methodology_and_metric_definitions_v2_1.pdf": "d17db36968d78f75",
+      "harborline_semantic_models.yml": "68e670871a4f459c",
+      "index_desk_channel_export.pdf": "fba2c75c898ed0b0"
+    },
+    "followup_conversation_id": "ac368c43-b2b6-4369-8284-7a2f1db7b2f0",
+    "health_analysis": {
+      "eval_run_id": null,
+      "job_run_id": null,
+      "run_group_id": null,
+      "status": "RUNNING"
+    },
+    "health_job_run_id": "ET_JOB_RUN_a01648479dc1402195a23c39aa18f3c9",
+    "last_eval_run_group_id": "ET_JOB_RUN_5c90cefc7d09490a8d39fa5c99686f78",
+    "last_eval_run_id": "ET_JOB_RUN_2a046d8d6547409dbdd985908425f3f4",
+    "last_eval_run_scores": [
+      0.9393939393939394,
+      0.8787878787878788,
+      0.9393939393939394
+    ],
+    "last_score": 0.9191919191919192,
+    "uploaded_documents": [
+      "business_glossary_and_data_ownership_register.pdf",
+      "calder_ridge_iv_q2_2026_quarterly_report.pdf",
+      "data_platform_wiki_harborline_poc_onboarding.pdf",
+      "harborline_index_methodology_and_metric_definitions_v2_1.pdf",
+      "index_desk_channel_export.pdf"
+    ]
+  }
+}

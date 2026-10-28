@@ -140,25 +140,25 @@
       "status": "ok"
     },
     "publish.connection": {
-      "at": "2026-10-13T00:36:00+00:00",
+      "at": "2026-10-26T19:35:44+00:00",
       "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
       "created": false,
       "status": "ok"
     },
     "publish.database": {
-      "at": "2026-10-13T00:36:06+00:00",
+      "at": "2026-10-26T19:35:46+00:00",
       "missing": [],
       "status": "ok",
       "tables": 21
     },
     "publish.documents": {
-      "at": "2026-10-13T04:11:05+00:00",
+      "at": "2026-10-26T19:35:48+00:00",
       "dataset_id": "ET_DATASET_a5c2a5203cde4cf1af9102cf64ec395b",
       "status": "ok",
-      "uploaded": 7
+      "uploaded": 0
     },
     "publish.domain": {
-      "at": "2026-10-13T00:36:00+00:00",
+      "at": "2026-10-26T19:35:45+00:00",
       "created": false,
       "domain_id": "ET_DOMAIN_f6df7b3a5120419383a6babb46d0f65d",
       "status": "ok"
@@ -170,42 +170,54 @@
       "status": "ok",
       "uploaded": 0
     },
+    "publish.federated": {
+      "at": "2026-10-26T19:35:46+00:00",
+      "sources": 0,
+      "status": "ok"
+    },
     "publish.instructions": {
-      "at": "2026-10-13T00:36:08+00:00",
+      "at": "2026-10-26T19:35:46+00:00",
       "chars": 5968,
       "status": "ok"
     },
     "publish.knowledge": {
-      "added": 49,
-      "at": "2026-10-13T00:36:09+00:00",
-      "existing": 0,
+      "added": 0,
+      "at": "2026-10-26T19:35:46+00:00",
+      "existing": 120,
       "status": "ok",
       "total": 49
     },
     "publish.lookup": {
-      "at": "2026-10-13T04:10:58+00:00",
-      "changed": 5,
+      "at": "2026-10-26T19:35:48+00:00",
+      "changed": 0,
       "missing": [],
       "status": "ok"
     },
     "publish.metrics": {
-      "at": "2026-10-13T04:10:43+00:00",
+      "added": 0,
+      "at": "2026-10-26T19:35:47+00:00",
       "created": [
         "p1_cases",
         "open_cases",
         "avg_csat",
         "bookings"
       ],
+      "existing": 37,
       "failed": [],
       "status": "ok",
       "total": 37
     },
     "publish.reviewed_queries": {
-      "added": 48,
-      "at": "2026-10-13T04:10:47+00:00",
-      "existing": 0,
+      "added": 0,
+      "at": "2026-10-26T19:35:47+00:00",
+      "existing": 48,
       "status": "ok",
       "total": 48
+    },
+    "publish.s3_dataset": {
+      "at": "2026-10-26T19:35:48+00:00",
+      "attached": false,
+      "status": "ok"
     },
     "rq_check_snowflake": {
       "at": "2026-10-13T00:23:31+00:00",

@@ -1,0 +1,408 @@
+{
+  "snowflake": {
+    "database": "MERIDIAN_POC",
+    "schema": "ANALYTICS"
+  },
+  "steps": {
+    "agent": {
+      "agent_id": "AGENT_9ca79491-0366-4e7b-965e-1b030c1461ab",
+      "at": "2026-10-16T00:20:53+00:00",
+      "is_draft": true,
+      "nodes": 5,
+      "status": "ok"
+    },
+    "app": {
+      "app_id": "app_99d32a563228427a884b41a537fe5d13",
+      "at": "2026-10-16T01:13:03+00:00",
+      "conversation_id": "cd247834-0493-4c29-b2f6-fd41be0e1b99",
+      "note": "build finished server-side at 00:36 (liveSpecVersion 2) after the local poll lost DNS; tabs verified in the browser: Findings Queue, Case Review, Export",
+      "status": "ok",
+      "tabs": [
+        "Findings Queue",
+        "Case Review",
+        "Export"
+      ]
+    },
+    "chat": {
+      "at": "2026-10-16T01:21:16+00:00",
+      "completed": false,
+      "conversation_id": "dd7f4372-9f1a-49a2-a63f-7c7d14172863",
+      "note": "answer completed at 01:19:29 (about 7.5 min); the text judge only sees the narrative, the tables carry the 11 findings and the $2.32M exposure. Earlier conversation 8a662247-489b-4c7d-919e-85674ef54183 answered the same question correctly.",
+      "score": "3/5 by text match; all 5 points present in the answer's lineage and findings tables",
+      "seconds": 427.7,
+      "status": "ok"
+    },
+    "ddl": {
+      "at": "2026-10-15T21:57:57+00:00",
+      "seconds": 8,
+      "statements": 21,
+      "status": "ok"
+    },
+    "docs": {
+      "at": "2026-10-15T22:22:56+00:00",
+      "failures": [],
+      "rendered": [
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/q2_2026_close_memo_contract_reconciliation.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/order_to_cash_reconciliation_policy_and_control_matrix.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/boomi_sync_incident_bulletin_2026_03.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/reconciliation_metric_definitions_v1_4.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/business_glossary_and_ownership_register.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/data_platform_wiki_meridian_poc_onboarding.pdf",
+        "/Users/chick/Desktop/Claude Code/wisdom_automated_demo_creator/demos/meridian/build/docs/close_reconciliation_channel_export.pdf"
+      ],
+      "status": "ok"
+    },
+    "document_chat": {
+      "at": "2026-10-16T01:28:03+00:00",
+      "conversation_id": "434f7d43-c444-43fe-8c8e-b4338c3be9f7",
+      "note": "answered from MCN-2025-0142-A2.pdf in the S3 archive: quoted amendment language and the full Exhibit B (8 entries, $2,850,000) in 55 s",
+      "question": "What does Amendment 2 to agreement MCN-2025-0142 say about the billing milestones and the term? Quote the amended terms from the signed document.",
+      "status": "ok"
+    },
+    "eval": {
+      "at": "2026-10-16T01:31:21+00:00",
+      "consistently_failing": 1,
+      "consistently_passing": 43,
+      "flaky": 4,
+      "passed": 45,
+      "run_group_id": "ET_JOB_RUN_c4badd6af01f40b5bdcfb28c27e1a751",
+      "run_id": "ET_JOB_RUN_b83fb710388548ba9eac320e0bff1f4f",
+      "run_ids": [
+        "ET_JOB_RUN_6d1f945903264e13aeae67dca520dcd3",
+        "ET_JOB_RUN_b2735ade154c43d0a4f4cd3889e03922",
+        "ET_JOB_RUN_b83fb710388548ba9eac320e0bff1f4f"
+      ],
+      "run_scores": [
+        0.9791666666666666,
+        0.9166666666666666,
+        0.9375
+      ],
+      "score": 0.9444444444444443,
+      "status": "ok",
+      "total": 48
+    },
+    "generate": {
+      "at": "2026-10-15T22:39:45+00:00",
+      "counts": {
+        "CONTRACTS": 428,
+        "CONTRACT_BILLING_SCHEDULE": 2709,
+        "CONTRACT_LINE_ITEMS": 1021,
+        "CUSTOMERS": 140,
+        "DATA_DICTIONARY": 39,
+        "NETSUITE_BILLING_SCHEDULE": 1717,
+        "NETSUITE_SALES_ORDERS": 273,
+        "NETSUITE_SALES_ORDER_LINES": 653,
+        "PRODUCTS": 8,
+        "RECONCILIATION_CONTROLS": 11,
+        "SALESFORCE_OPPORTUNITIES": 424,
+        "SALESFORCE_OPPORTUNITY_PRODUCTS": 743
+      },
+      "mismatches": [],
+      "missing": [],
+      "schema_errors": [],
+      "seconds": 0,
+      "status": "ok"
+    },
+    "grants": {
+      "at": "2026-10-15T21:58:05+00:00",
+      "seconds": 2,
+      "statements": 7,
+      "status": "ok"
+    },
+    "health": {
+      "already_queued": false,
+      "analysis_status": "RUNNING",
+      "at": "2026-10-16T01:41:35+00:00",
+      "code": "OK",
+      "job_run_id": "ET_JOB_RUN_1ed9eb7a7bbb4fc2bb774b2855426e29",
+      "quick_check_job": "ET_JOB_RUN_2b7604ceee4840508777b06bb3046208",
+      "status": "ok",
+      "trigger": {
+        "message": "an analysis is already running",
+        "status": "RUNNING"
+      }
+    },
+    "load": {
+      "at": "2026-10-15T22:40:40+00:00",
+      "counts": {
+        "CONTRACTS": 428,
+        "CONTRACT_BILLING_SCHEDULE": 2709,
+        "CONTRACT_LINE_ITEMS": 1021,
+        "CUSTOMERS": 140,
+        "DATA_DICTIONARY": 39,
+        "NETSUITE_BILLING_SCHEDULE": 1717,
+        "NETSUITE_SALES_ORDERS": 273,
+        "NETSUITE_SALES_ORDER_LINES": 653,
+        "PRODUCTS": 8,
+        "RECONCILIATION_CONTROLS": 11,
+        "SALESFORCE_OPPORTUNITIES": 424,
+        "SALESFORCE_OPPORTUNITY_PRODUCTS": 743
+      },
+      "failures": [],
+      "seconds": 40,
+      "status": "ok",
+      "tables": [
+        "CUSTOMERS",
+        "PRODUCTS",
+        "RECONCILIATION_CONTROLS",
+        "CONTRACTS",
+        "CONTRACT_LINE_ITEMS",
+        "CONTRACT_BILLING_SCHEDULE",
+        "SALESFORCE_OPPORTUNITIES",
+        "SALESFORCE_OPPORTUNITY_PRODUCTS",
+        "NETSUITE_SALES_ORDERS",
+        "NETSUITE_SALES_ORDER_LINES",
+        "NETSUITE_BILLING_SCHEDULE",
+        "DATA_DICTIONARY"
+      ]
+    },
+    "metrics_check": {
+      "at": "2026-10-15T22:17:38+00:00",
+      "count": 27,
+      "failures": [],
+      "status": "ok"
+    },
+    "publish.connection": {
+      "at": "2026-10-15T22:24:59+00:00",
+      "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+      "created": false,
+      "status": "ok"
+    },
+    "publish.database": {
+      "at": "2026-10-15T22:27:40+00:00",
+      "missing": [],
+      "status": "ok",
+      "tables": 16
+    },
+    "publish.documents": {
+      "at": "2026-10-15T22:27:58+00:00",
+      "dataset_id": "ET_DATASET_9ad15afc686147faa03ea201366c916a",
+      "status": "ok",
+      "uploaded": 7
+    },
+    "publish.domain": {
+      "at": "2026-10-15T22:25:00+00:00",
+      "created": true,
+      "domain_id": "ET_DOMAIN_97f519e3d9f943179957fd72ebbbf0ec",
+      "status": "ok"
+    },
+    "publish.extraction": {
+      "accepted": {
+        "accepted": 357,
+        "by_family": {
+          "descriptions": 150,
+          "knowledge": 188,
+          "metrics": 29,
+          "reviewed_queries": 121,
+          "synonyms": 66
+        },
+        "errors": [
+          "Reviewed query with question 'Which amendments are signed in DocuSign but not booked in Salesforce?' already exists.",
+          "Reviewed query with question 'Which account owners have the most mismatches?' already exists.",
+          "Reviewed query with question 'Which agreements were signed or amended in the last 30 days?' already exists.",
+          "Reviewed query with question 'Which agreements have a NetSuite end date that differs from the contract end date?' alread",
+          "Reviewed query with question 'Show the NetSuite sales orders and billing schedule for Halvorsen Therapeutics.' already e"
+        ],
+        "failed": 47,
+        "left_pending": 197,
+        "pending_before": 554
+      },
+      "at": "2026-10-16T00:13:43+00:00",
+      "coverage": {
+        "knowledge": {
+          "in_domain": 188,
+          "story_facts": 20
+        },
+        "metrics": {
+          "coverage": 1.0,
+          "expected": 27,
+          "found": 27,
+          "in_domain": 29,
+          "missing": []
+        },
+        "reviewed_queries": {
+          "coverage": 0.976,
+          "expected": 41,
+          "found": 40,
+          "in_domain": 80,
+          "missing": [
+            "Show me every contract with amendments where NetSuite still reflects the original terms."
+          ]
+        }
+      },
+      "job_status": "JOB_RUN_STATUS_SUCCESS",
+      "run_id": "ET_JOB_RUN_1baf59949c9a421f86c5816203fba53b",
+      "status": "ok",
+      "uploaded": 1
+    },
+    "publish.instructions": {
+      "at": "2026-10-15T22:27:41+00:00",
+      "chars": 5305,
+      "status": "ok"
+    },
+    "publish.lookup": {
+      "at": "2026-10-15T22:27:50+00:00",
+      "changed": 5,
+      "missing": [],
+      "status": "ok"
+    },
+    "publish.s3_dataset": {
+      "at": "2026-10-16T01:24:43+00:00",
+      "connection_id": "et-connection-6dc77f2c90d7487ebe8ebb896d97f28e",
+      "dataset_id": "ET_DATASET_7ecd633c5c2c4150b0bfa35076153235",
+      "extracted": 0,
+      "files": 78,
+      "indexing_pending": false,
+      "status": "ok"
+    },
+    "rq_check": {
+      "at": "2026-10-16T00:03:30+00:00",
+      "count": 48,
+      "failures": 0,
+      "status": "ok"
+    },
+    "rq_check_snowflake": {
+      "at": "2026-10-16T00:07:16+00:00",
+      "count": 48,
+      "failures": 0,
+      "status": "ok"
+    },
+    "validate": {
+      "at": "2026-10-16T00:03:27+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 67,
+      "status": "ok"
+    },
+    "validate_snowflake": {
+      "at": "2026-10-15T22:51:54+00:00",
+      "failed": 0,
+      "failures": [],
+      "passed": 66,
+      "status": "ok"
+    }
+  },
+  "wisdom": {
+    "agent_id": "AGENT_9ca79491-0366-4e7b-965e-1b030c1461ab",
+    "agent_name": "Amendment Sync Watch",
+    "app_conversation_id": "cd247834-0493-4c29-b2f6-fd41be0e1b99",
+    "app_id": "app_99d32a563228427a884b41a537fe5d13",
+    "app_name": "Contract Reconciliation Review",
+    "connection_id": "et-connection-678570afa5f14afe9bb146040e70c28c",
+    "conversations": [
+      {
+        "chars": 582,
+        "completed": true,
+        "id": "8a662247-489b-4c7d-919e-85674ef54183",
+        "question": "Show me the full amendment lineage for Halvorsen Therapeutics and where Salesforce and NetSuite each stand relative to the latest amendment and what the dollar exposure is",
+        "score": 0.0
+      },
+      {
+        "chars": 0,
+        "completed": false,
+        "id": "dd7f4372-9f1a-49a2-a63f-7c7d14172863",
+        "question": "Show me the full amendment lineage for Halvorsen Therapeutics and where Salesforce and NetSuite each stand relative to the latest amendment and what the dollar exposure is",
+        "score": 0.0
+      }
+    ],
+    "dataset_id": "ET_DATASET_9ad15afc686147faa03ea201366c916a",
+    "document_conversation_id": "434f7d43-c444-43fe-8c8e-b4338c3be9f7",
+    "domain_id": "ET_DOMAIN_97f519e3d9f943179957fd72ebbbf0ec",
+    "eval_set_id": "5d8d726e-2935-40ea-a4a2-3cc25b5c1f6b",
+    "extraction_coverage": {
+      "knowledge": {
+        "in_domain": 188,
+        "story_facts": 20
+      },
+      "metrics": {
+        "coverage": 1.0,
+        "expected": 27,
+        "found": 27,
+        "in_domain": 29,
+        "missing": []
+      },
+      "reviewed_queries": {
+        "coverage": 0.976,
+        "expected": 41,
+        "found": 40,
+        "in_domain": 80,
+        "missing": [
+          "Show me every contract with amendments where NetSuite still reflects the original terms."
+        ]
+      }
+    },
+    "extraction_run_id": "ET_JOB_RUN_1baf59949c9a421f86c5816203fba53b",
+    "extraction_runs": {
+      "ET_JOB_RUN_1baf59949c9a421f86c5816203fba53b": {
+        "files": [
+          "meridian_certified_queries.sql"
+        ]
+      },
+      "ET_JOB_RUN_943d52ab3a744dd78ec2360eb858b8ab": {
+        "files": [
+          "boomi_sync_incident_bulletin_2026_03.pdf"
+        ]
+      },
+      "ET_JOB_RUN_a9fa29409b7a49e29929f0e35f1a2599": {
+        "files": [
+          "close_reconciliation_channel_export.pdf",
+          "q2_2026_close_memo_contract_reconciliation.pdf",
+          "order_to_cash_reconciliation_policy_and_control_matrix.pdf"
+        ]
+      },
+      "ET_JOB_RUN_bfee35b231b940238ac82913e101f691": {
+        "files": [
+          "reconciliation_metric_definitions_v1_4.pdf",
+          "business_glossary_and_ownership_register.pdf",
+          "data_platform_wiki_meridian_poc_onboarding.pdf"
+        ]
+      },
+      "ET_JOB_RUN_f76c85c662974afc921d17df22ce37b0": {
+        "files": [
+          "meridian_semantic_models.yml",
+          "meridian_certified_queries.sql",
+          "meridian_analyst_handbook.txt"
+        ]
+      }
+    },
+    "extraction_uploaded": {
+      "boomi_sync_incident_bulletin_2026_03.pdf": "095fd041f420bc8b",
+      "business_glossary_and_ownership_register.pdf": "a0f5008fdf694414",
+      "close_reconciliation_channel_export.pdf": "8429a32ef49a572f",
+      "data_platform_wiki_meridian_poc_onboarding.pdf": "d8aff574ab7cabcf",
+      "meridian_analyst_handbook.txt": "b3a400c3e0823426",
+      "meridian_certified_queries.sql": "d480141a86d2ff60",
+      "meridian_semantic_models.yml": "50a6004ba36bfae3",
+      "order_to_cash_reconciliation_policy_and_control_matrix.pdf": "406b805bbb391ff8",
+      "q2_2026_close_memo_contract_reconciliation.pdf": "44ccc24f85334f34",
+      "reconciliation_metric_definitions_v1_4.pdf": "c4233852290be6c4"
+    },
+    "followup_conversation_id": "dd7f4372-9f1a-49a2-a63f-7c7d14172863",
+    "health_analysis": {
+      "eval_run_id": null,
+      "job_run_id": null,
+      "run_group_id": null,
+      "status": "RUNNING"
+    },
+    "health_job_run_id": "ET_JOB_RUN_2b7604ceee4840508777b06bb3046208",
+    "last_eval_run_group_id": "ET_JOB_RUN_c4badd6af01f40b5bdcfb28c27e1a751",
+    "last_eval_run_id": "ET_JOB_RUN_6d1f945903264e13aeae67dca520dcd3",
+    "last_eval_run_scores": [
+      0.9791666666666666,
+      0.9166666666666666,
+      0.9375
+    ],
+    "last_score": 0.9444444444444443,
+    "s3_connection_id": "et-connection-6dc77f2c90d7487ebe8ebb896d97f28e",
+    "s3_dataset_id": "ET_DATASET_7ecd633c5c2c4150b0bfa35076153235",
+    "uploaded_documents": [
+      "boomi_sync_incident_bulletin_2026_03.pdf",
+      "business_glossary_and_ownership_register.pdf",
+      "close_reconciliation_channel_export.pdf",
+      "data_platform_wiki_meridian_poc_onboarding.pdf",
+      "order_to_cash_reconciliation_policy_and_control_matrix.pdf",
+      "q2_2026_close_memo_contract_reconciliation.pdf",
+      "reconciliation_metric_definitions_v1_4.pdf"
+    ]
+  }
+}

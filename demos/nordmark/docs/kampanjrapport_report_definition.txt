@@ -1,0 +1,129 @@
+MICROSTRATEGY REPORT DEFINITION EXPORT
+======================================================================
+Project            : Nordmark BI
+Report name        : Kampanjrapport - Kampanjutfall och prognosträffsäkerhet per kedja och vecka
+Report ID          : 8F2A1C3E44D9B1A7C0E5F6D2A9B3C4E1
+Folder             : Public Objects\Reports\Demand Planning\Kampanj
+Report type        : Grid (standard)
+Owner              : Nordmark BI Administration (bi-admin)
+Business owner     : Head of Campaign Planning, Sofia Lindahl
+Created            : 2023-02-14 by bi-admin
+Last modified      : 2026-05-12 10:41 by bi-admin (change request BI-2291: added Prognosfel CatBoost %)
+Schedule           : Weekly, Monday 06:00, after the campaign mart load (Airflow dag dw_campaign_mart_daily)
+Subscriptions      : planning-kronmat@..., planning-torghallen@..., planning-grosshallen@..., demand-planning-analytics@... (Excel + PDF)
+Service accounts   : MSTR_KRONMAT_RPT, MSTR_TORGHALLEN_RPT, MSTR_GROSSHALLEN_RPT (one per chain; same report, chain prompt pre-answered)
+Warehouse          : NORDMARK_DW (Teradata), database/schema ANALYTICS
+Export generated   : 2026-05-21 06:20 (Object Manager, full definition)
+======================================================================
+
+[DESCRIPTION]
+For each campaign week (vecka) and article (artikel) of a chain (kedja): planned quantity, the
+sold forecast from the group's CatBoost demand model, the purchase forecast from the chain's own
+plan (kedjans prognos), the actual quantity sold, and the forecast error of each forecast. Grouped by
+campaign and tactic type. Used in the Monday planning review and in the post-campaign evaluation.
+
+[ATTRIBUTES]
+ID   Name            Forms (ID, DESC)                              Lookup table / column (ANALYTICS)
+A01  Kedja           ID: KEDJA | DESC: KEDJA                        KAMPANJ.KEDJA  (also BANNERS.BANNER_NAME)
+A02  Vecka           ID: KALENDER_VECKA_ID | DESC: VECKA_LABEL      CALENDAR (week level: WEEK_LABEL, WEEK_START_DATE); fact key KAMPANJ_ARTIKEL_VECKA.KALENDER_VECKA_ID
+A03  Kampanj         ID: KAMPANJ_ID | DESC: KAMPANJ_NAMN            KAMPANJ
+A04  Taktiktyp       ID: TAKTIK_TYP_KOD | DESC: TAKTIK_TYP          KAMPANJ (PN Prisnedsättning, MK Multiköp 3 för 2, MP Medlemspris, HP Halva priset, KU Kupong)
+A05  Artikel         ID: ARTIKEL_ID | DESC: ARTIKEL_NAMN            ARTIKEL
+A06  Kategori        ID: CATEGORY_ID | DESC: KATEGORI               ARTIKEL (from PRODUCT_CATEGORIES)
+A07  Nyckel          ID: NYCKEL                                     KAMPANJ_ARTIKEL_VECKA.NYCKEL = VECKA_LABEL || '-' || ARTIKEL_ID (one row per week and article)
+A08  Färskvara       ID: FARSKVARA                                  ARTIKEL.FARSKVARA (1 = perishable)
+A09  Butik           ID: STORE_ID | DESC: STORE_NAME                STORES (used only on the store drill, see DRILL MAP)
+
+[FACTS]
+F01  Planerad kvantitet       KAMPANJ_ARTIKEL_VECKA.PLANERAD_KVANTITET
+F02  Såld prognos CatBoost    KAMPANJ_ARTIKEL_VECKA.SALD_PROGNOS_CATBOOST
+F03  Köpt prognos kedjan      KAMPANJ_ARTIKEL_VECKA.KOPT_PROGNOS_KEDJAN
+F04  Faktisk såld             KAMPANJ_ARTIKEL_VECKA.FAKTISK_SALD
+F05  Levererad kvantitet      KAMPANJ_ARTIKEL_VECKA.LEVERERAD_KVANTITET
+F06  Kampanjförsäljning SEK   KAMPANJ_ARTIKEL_VECKA.KAMPANJFORSALJNING_SEK
+F07  Butiksprognos            KAMPANJ_BUTIK_VECKA.PROGNOS_KVANTITET (store drill)
+F08  Butik faktisk såld       KAMPANJ_BUTIK_VECKA.FAKTISK_SALD (store drill)
+
+[METRICS]
+M01  Planerad kvantitet                 Sum(F01)                                   Format #,##0
+M02  Såld prognos - CatBoost            Sum(F02)                                   Format #,##0
+M03  Köpt prognos - KEDJANS PROGNOS     Sum(F03)                                   Format #,##0
+M04  Faktisk såld                       Sum(F04)                                   Format #,##0
+M05  Prognosfel CatBoost %              (M02 - M04) / M04                          Format 0.0%   Positive = over-forecast
+M06  Prognosfel kedjan %                (M03 - M04) / M04                          Format 0.0%   Positive = over-forecast
+M07  Bias per taktik                    Sum(F03) / Sum(F04) - 1  at level Taktiktyp  Format 0.0%  (ratio of sums, never average of rows)
+M08  Överprognos kvantitet              Sum(Max(F03 - F04, 0))                     Format #,##0
+M09  Levererad kvantitet                Sum(F05)                                   Format #,##0
+M10  Kampanjförsäljning SEK             Sum(F06)                                   Format #,##0 kr
+M11  Avvikelse % (butik)                (Sum(F07) - Sum(F08)) / Sum(F08)           Format 0.0%   Store drill only
+Subtotal rule: subtotals and the grand total recompute M05, M06, M07 and M11 from the summed facts (dynamic aggregation),
+never as the average of the row percentages.
+
+[PROMPTS]
+P01  Kedja        Attribute element prompt on A01. Required. Single select. Default: pre-answered per service account.
+P02  Vecka        Attribute element prompt on A02. Required. Single select. Default: latest completed campaign week
+                  (max VECKA_LABEL where FAKTISK_SALD is populated). Accepts the week label (2026-W19) or Calendar_Week_Id (202619).
+P03  Taktiktyp    Attribute element prompt on A04. Optional. Multi select. Default: all.
+P04  Kampanj      Attribute element prompt on A03. Optional. Multi select. Default: all campaigns in the selected week.
+
+[REPORT FILTER]
+Kedja = {P01} AND Vecka = {P02} AND (Taktiktyp IN {P03} OR {P03} is empty) AND (Kampanj IN {P04} OR {P04} is empty)
+
+[VIEW FILTER]
+None by default. Analysts may add Färskvara = 1 to show perishables only; the subtotals recompute.
+
+[TEMPLATE / GRID LAYOUT]
+Rows    : Vecka > Kampanj > Taktiktyp > Nyckel > Artikel (with Kategori and Färskvara as attribute forms shown)
+Columns : M01 Planerad kvantitet | M02 Såld prognos - CatBoost | M03 Köpt prognos - KEDJANS PROGNOS | M04 Faktisk såld |
+          M05 Prognosfel CatBoost % | M06 Prognosfel kedjan %
+Sort    : Taktiktyp ascending, Kampanj ascending, Artikel ascending
+Totals  : Subtotal per Taktiktyp (M01..M06, M07 shown as "Bias per taktik"), grand total per Vecka
+Banding : Row banding on; perishables flagged with the Färskvara form; thresholds: M06 > 15% red, M06 < -10% amber
+Page-by : Kedja (one page per chain when run without P01)
+
+[DRILL MAP]
+Kedja -> Kampanj -> Taktiktyp -> Artikel (standard path, within this report)
+Artikel -> Nyckel (detail)
+Kampanj -> Butik  (drill to report "Kampanjavvikelse per butik", 3C7D9E1A..., on KAMPANJ_BUTIK_VECKA with M11 and the
+                   competitor-event flag HAR_KONKURRENTHANDELSE_90D from V_KAMPANJ_BUTIK_AVVIKELSE)
+Vecka -> Kvartal  (CALENDAR.QUARTER_LABEL; used by the quarterly summary report)
+
+[SQL GENERATED BY THE REPORT ENGINE]  (pass 1 of 1, run on 2026-05-18 06:00:07 for MSTR_KRONMAT_RPT, P01 = Kronmat, P02 = 2026-W19)
+select a11."VECKA_LABEL"  "Vecka",
+       a11."KAMPANJ_NAMN"  "Kampanj",
+       a11."TAKTIK_TYP"  "Taktiktyp",
+       a11."NYCKEL"  "Nyckel",
+       a11."ARTIKEL_NAMN"  "Artikel",
+       a11."KATEGORI"  "Kategori",
+       a11."FARSKVARA"  "Farskvara",
+       sum(a11."PLANERAD_KVANTITET")  "WJXBFS1",
+       sum(a11."SALD_PROGNOS_CATBOOST")  "WJXBFS2",
+       sum(a11."KOPT_PROGNOS_KEDJAN")  "WJXBFS3",
+       sum(a11."FAKTISK_SALD")  "WJXBFS4"
+from   NORDMARK_DW.ANALYTICS.V_KAMPANJRAPPORT  a11
+where  a11."KEDJA" = 'Kronmat'
+  and  a11."VECKA_LABEL" = '2026-W19'
+group by a11."VECKA_LABEL", a11."KAMPANJ_NAMN", a11."TAKTIK_TYP", a11."NYCKEL", a11."ARTIKEL_NAMN", a11."KATEGORI", a11."FARSKVARA"
+order by a11."TAKTIK_TYP", a11."KAMPANJ_NAMN", a11."ARTIKEL_NAMN"
+-- M05 and M06 are computed in the analytical engine from WJXBFS2/WJXBFS3 and WJXBFS4 (smart metrics).
+
+[NOTES - BUSINESS RULES]
+1. Campaign week (Vecka) is the ISO week of the first delivery day, KAMPANJ.LEVERANS_FRAN. Selling days (KAMPANJ_START..KAMPANJ_SLUT)
+   fall in the same or the following week; the report is keyed on the delivery week.
+2. Forecast error is (forecast - actual sold) / actual sold. A positive value means over-forecast (more bought or predicted than sold).
+3. Såld prognos is the group CatBoost demand model output (loaded by the catboost_forecast_feed task). Köpt prognos is the chain's own
+   purchase plan (kedjans prognos) as entered in the chain planning tool; Planerad kvantitet is the purchase plan rounded up to whole
+   cases (kolli) and is what was ordered.
+4. Rows for future weeks (no actual sold yet) show M01..M03 only; M04..M06 are blank. They appear when P02 is set to a future week.
+5. Quantities are consumer units (st, kg or l as per ARTIKEL.ENHET), never SEK, except M10.
+6. Cost and margin are NOT in this report. The finance system (purchase cost, margin) has not been migrated to the warehouse;
+   the planning team uses the illustrative extract ARTIKEL_KOSTNAD_MANAD (labelled KALLA = 'ILLUSTRATIV - finanssystem ej migrerat')
+   for the margin effect of over-forecasting, outside this report.
+7. Totals are ratios of sums. Do not average the row percentages; the analytical engine recomputes M05/M06 at every level.
+8. Chain naming: Kedja = Kronmat, Torghallen, Grosshallen. The same report serves all three via the per-chain service accounts.
+
+[CHANGE LOG]
+2026-05-12  BI-2291  Added Prognosfel CatBoost % (M05) next to Prognosfel kedjan % (M06); CatBoost feed in production since 2026-02.
+2025-11-03  BI-2104  Added Färskvara form and the threshold banding on M06.
+2025-03-17  BI-1877  Grosshallen added as a chain (service account MSTR_GROSSHALLEN_RPT).
+2023-02-14           Created.

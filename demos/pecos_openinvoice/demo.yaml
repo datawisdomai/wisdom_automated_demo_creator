@@ -1,0 +1,157 @@
+name: pecos_openinvoice
+title: Pecos Ridge OpenInvoice Supply Chain
+vertical: Oil & Gas
+built_for: Jeff's partner request (digitz) — add Enverus OpenInvoice line items plus a generic product taxonomy to the existing Pecos Ridge "O&G" domain so supply chain can compare products and unit prices across suppliers
+as_of: 2026-09-30
+data_start: 2022-01-01
+seed: 20261019
+inputs: [inputs/jeff_request.md]
+
+persona:
+  primary: Supply Chain Category Manager
+  secondary: [VP Supply Chain, Completions Engineer, AP Analyst, Data Steward]
+  kpis: [spend by generic product, standard unit price by supplier, price dispersion, savings at best observed price, pricebook variance and disputed lines, unclassified spend, cost per lateral foot by generic product]
+
+snowflake:
+  database: PECOS_RIDGE_SCM_OPENINVOICE
+  schema: OPENINVOICE
+  ddl: 01_snowflake_ddl.sql
+  load_order: [OI_SUPPLIER, SCM_PRODUCT_TAXONOMY, OI_PRICEBOOK_ITEM, SCM_ITEM_CLASSIFICATION,
+               OI_FIELD_TICKET, OI_INVOICE, OI_INVOICE_LINE, OI_REF_WELL, OI_REF_AFE, OI_REF_VENDOR, OI_ERP_INTEGRATION_LOG, DATA_DICTIONARY]
+  views: [V_INVOICE_LINE_CLASSIFIED, V_GENERIC_PRODUCT_PRICE_MONTHLY, V_SUPPLIER_ALTERNATIVES, V_PRICEBOOK_VARIANCE,
+          V_UNCLASSIFIED_SPEND, V_AFE_PRODUCT_COST]
+  expected_rows:
+    DATA_DICTIONARY: 175
+    OI_ERP_INTEGRATION_LOG: 23556
+    OI_FIELD_TICKET: 49386
+    OI_INVOICE: 50693
+    OI_INVOICE_LINE: 126980
+    OI_PRICEBOOK_ITEM: 144
+    OI_REF_AFE: 1614
+    OI_REF_VENDOR: 316
+    OI_REF_WELL: 1494
+    OI_SUPPLIER: 270
+    SCM_ITEM_CLASSIFICATION: 6274
+    SCM_PRODUCT_TAXONOMY: 59
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    AS_OF: 2026-09-30
+    OPENINVOICE_GO_LIVE: 2022-01-01
+    ERP_ID_STAMPING_FROM: 2025-01-01
+    CATEGORY_MANAGER: Jessica Whitaker
+    DATA_STEWARD: Hector Brown
+    HERO_GENERIC_PRODUCT: Corrosion inhibitor, water-soluble, filming amine
+    HERO_CHEM_SUPPLIER_LOW: "0000100039"    # Corrosion Control Chem LLC (CorroShield CS-7000)
+    HERO_CHEM_SUPPLIER_HIGH: "0000100040"   # Basin Chemical LLC (CorroGuard BC-220)
+    HERO_PROPPANT_DISPUTED: "0000100043"    # Redline Sand LLC (RL100 above pricebook in 2026)
+    HERO_OCTG_PRODUCT: Production casing 5-1/2 in 20 lb/ft P-110 BTC
+    UNCLASSIFIED_TARGET_SHARE_2026: 0.08
+
+control_points:
+  - id: CP1
+    name: "Hidden price dispersion: the same water-soluble corrosion inhibitor costs 20%+ more per gallon from one supplier and in small packs; invisible in SPEND_INVOICE"
+    hero: Corrosion inhibitor, water-soluble, filming amine
+    targets:
+      - {metric: cp1_supplier_price_gap_pct, op: ">=", value: 18}
+      - {metric: cp1_savings_at_best_price_2025_usd, op: ">=", value: 500000}
+      - {metric: cp1_pack_premium_pct, op: ">=", value: 8}
+  - id: CP2
+    name: "Proppant: 100 mesh from three mines on delivered vs FOB plus last-mile pricing; Redline invoiced above its pricebook rate in 2026 and the lines are disputed"
+    hero: Redline Sand LLC
+    targets:
+      - {metric: cp2_redline_over_pricebook_lines_2026, op: ">=", value: 30}   # Redline has ~36 proppant invoices Feb-Sep 2026 in SPEND_INVOICE
+      - {metric: cp2_redline_variance_usd_2026, op: ">=", value: 150000}
+      - {metric: cp2_disputed_share_redline, op: ">=", value: 0.5}
+  - id: CP3
+    name: "OCTG: 5-1/2 in 20# P-110 casing is described five different ways and priced per joint or per foot; normalised to $/ft the spread is visible"
+    hero: Production casing 5-1/2 in 20 lb/ft P-110 BTC
+    targets:
+      - {metric: cp3_distinct_descriptions, op: ">=", value: 5}
+      - {metric: cp3_distinct_uoms, op: ">=", value: 2}
+      - {metric: cp3_price_spread_pct, op: ">=", value: 12}
+  - id: CP4
+    name: "Classification backlog: about 8% of 2026 line spend has no approved generic product, concentrated in rentals and distributor items"
+    hero: Hector Brown's steward queue
+    targets:
+      - {metric: cp4_unclassified_share_2026, op: ">=", value: 0.06}
+      - {metric: cp4_unclassified_share_2026, op: "<=", value: 0.10}
+      - {metric: cp4_rental_share_of_unclassified, op: ">=", value: 0.5}
+  - id: CP5
+    name: "Operational hook: completion-phase generic product cost per lateral foot for 2025-26 wells and a +10% proppant sensitivity against the Q3 reforecast"
+    hero: 2025-26 completions
+    targets:
+      - {metric: cp5_wells_with_afe_lines, op: ">=", value: 40}
+      - {metric: cp5_exact_slice_reconciles, op: "==", value: 1}
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+documents: []
+
+# Authored assets for the context extractor (the only way context enters the domain).
+context_assets:
+  - {spec: docs/pecos_openinvoice_scm_product_taxonomy_standard_v3.md, kind: standard}
+  - {spec: docs/pecos_openinvoice_supplier_item_alias_glossary.md, kind: glossary}
+  - {spec: docs/pecos_openinvoice_openinvoice_integration_wiki.md, kind: wiki}
+  - {spec: docs/pecos_openinvoice_supply_chain_category_channel_export.md, kind: chat_export}
+  - {spec: docs/pecos_openinvoice_chemicals_category_review_memo_2026_q3.md, kind: memo}
+
+live_app:
+  name: Pecos Ridge Supply Chain Spend Cube
+  prompt: live_app_prompt.md
+  tabs: [Category Overview, Price Dispersion, Pricebook Variance & Disputes, Classification Queue, Cost per Lateral Foot]
+
+chat:
+  followup_question: What did we pay per gallon for water-soluble corrosion inhibitor by supplier and pack size in 2025 and how much would we have saved at the best observed price
+  expected_points:
+    - "two suppliers: Corrosion Control Chem (CorroShield CS-7000) and Basin Chemical (CorroGuard BC-220)"
+    - "Corrosion Control Chem is the cheaper supplier per gallon"
+    - "small packs (pails and drums) carry a premium over totes and bulk"
+    - "savings at the best observed price are at least half a million dollars for 2025"
+
+agent:
+  name: Price Variance Watch
+  prompt: agent_prompt.md
+  enabled: false
+
+wisdom:
+  deployment: digitz
+  workspace_id: ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024   # "WisdomAI" — the partner tenant's only workspace
+  existing_domain: true                                          # ADD to the partner's O&G domain; never create / rename / delete it
+  domain_id: ET_DOMAIN_4804a0b2ffcd484ab6d7cf410dceed55
+  domain_name: O&G
+  domain_description: Enverus OpenInvoice e-invoicing for Pecos Ridge Energy - invoice headers, line items with supplier item descriptions quantities and unit prices, field tickets, loaded supplier price books, and the supply-chain generic product taxonomy with the supplier-item classification crosswalk. Snowflake PECOS_RIDGE_SCM_OPENINVOICE.OPENINVOICE. Data 2022-01-01 to 2026-09-30.
+  connection: {name: "Pecos Ridge OpenInvoice (Snowflake)", create: true}   # NEW connection on our account XMSPMYE-PAB51256; we own it
+  instructions_mode: skip
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by:
+  lookup_columns: [OI_SUPPLIER.SUPPLIER_NAME, SCM_PRODUCT_TAXONOMY.GENERIC_PRODUCT_NAME, SCM_PRODUCT_TAXONOMY.LEVEL1_FAMILY, OI_INVOICE_LINE.SUPPLIER_ITEM_DESCRIPTION]
+  eval: {name: Pecos Ridge OpenInvoice reviewed queries, run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}
+  context_mode: extractor
+  extraction: {accept: [knowledge, synonyms, metrics, reviewed_queries], coverage_threshold: 0.9, batch_size: 3}
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md
+
+# Stretch (after the structured path): supplier spec sheets and MSA pricing exhibits in S3, attached to the domain.
+s3:
+  bucket_env: S3_BUCKET
+  prefix_env: S3_PREFIX_for_contracts
+  region_env: S3_REGION
+  subfolder: pecos_openinvoice/supplier_docs
+  connection_name: Pecos Ridge Supplier Document Archive
+  dataset_name: Pecos Ridge supplier spec sheets and pricing exhibits
+generated_documents:
+  module: supplier_docs.py
+  out: build/supplier_docs
+
+manual_steps: []

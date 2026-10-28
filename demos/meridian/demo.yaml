@@ -1,0 +1,169 @@
+name: meridian
+title: Meridian Clinician Network
+vertical: Technology
+built_for: Doximity conversation (CAO + Director of SOX and Automation); three-way contract reconciliation; no prospect names appear anywhere in the demo
+as_of: 2026-09-30
+data_start: 2024-01-01
+seed: 20260930
+inputs: [inputs/prospect_brief.md, inputs/schema_and_questions.md, inputs/revision_notes.md]
+
+persona:
+  primary: Chief Accounting Officer
+  secondary: [Director of SOX and Automation, Revenue Accounting Manager, Billing Lead, Deal Desk / Sales Operations lead]
+  kpis: [contract chains that reconcile across DocuSign Salesforce and NetSuite, open dollar exposure, findings by owning team and SOX control, amendments not reflected downstream, billing milestones missing from NetSuite, review time per finding]
+
+snowflake:
+  database: MERIDIAN_POC
+  schema: ANALYTICS
+  ddl: 01_snowflake_ddl.sql
+  load_order: [CUSTOMERS, PRODUCTS, RECONCILIATION_CONTROLS,
+               CONTRACTS, CONTRACT_LINE_ITEMS, CONTRACT_BILLING_SCHEDULE,
+               SALESFORCE_OPPORTUNITIES, SALESFORCE_OPPORTUNITY_PRODUCTS,
+               NETSUITE_SALES_ORDERS, NETSUITE_SALES_ORDER_LINES, NETSUITE_BILLING_SCHEDULE,
+               DATA_DICTIONARY]
+  views: [V_CONTRACT_CHAIN, V_AMENDMENT_LINEAGE, V_DEAL_CROSSWALK, V_CHAIN_SYSTEM_SUMMARY]
+  expected_rows:
+    CUSTOMERS: 140
+    PRODUCTS: 8
+    RECONCILIATION_CONTROLS: 11
+    CONTRACTS: 428
+    CONTRACT_LINE_ITEMS: 1021
+    CONTRACT_BILLING_SCHEDULE: 2709
+    SALESFORCE_OPPORTUNITIES: 424
+    SALESFORCE_OPPORTUNITY_PRODUCTS: 743
+    NETSUITE_SALES_ORDERS: 273
+    NETSUITE_SALES_ORDER_LINES: 653
+    NETSUITE_BILLING_SCHEDULE: 1717
+    DATA_DICTIONARY: 39
+
+generator:
+  module: generator.py
+  checks: checks.py
+  constants:
+    HERO_CUSTOMER: Halvorsen Therapeutics
+    HERO_CUSTOMER_ID: CUST-0017
+    HERO_CONTRACT_NUMBER: MCN-2025-0142
+    HERO_MSA_SIGNED: 2025-02-10
+    HERO_MSA_TCV: 1800000
+    HERO_A1_SIGNED: 2025-06-16
+    HERO_A1_TCV: 2250000
+    HERO_A2_SIGNED: 2025-11-03
+    HERO_A2_TCV: 2850000
+    HERO_A3_SIGNED: 2026-07-20
+    HERO_A3_TCV: 2730000
+    HERO_OWNER: Dana Whitfield
+    BOOMI_INCIDENT_DATE: 2026-03-01
+    MILESTONE_TOLERANCE_DAYS: 7
+    AMOUNT_TOLERANCE_USD: 100
+    HIGH_SEVERITY_USD: 100000
+
+control_points:
+  - id: CP1
+    name: "Three-way match at Q3 close - 15-20% of live contract chains fail at least one check with more than 5M USD of exposure"
+    hero: the 2026-09-30 three-way match
+    targets:
+      - {metric: chain_mismatch_rate, op: ">=", value: 0.15}
+      - {metric: chain_mismatch_rate, op: "<=", value: 0.22}
+      - {metric: open_exposure_usd, op: ">=", value: 5000000}
+      - {metric: high_severity_findings, op: ">=", value: 15}
+  - id: CP2
+    name: "Halvorsen Therapeutics chain of three amendments has drifted across both systems; amended chains fail far more often"
+    hero: Halvorsen Therapeutics
+    targets:
+      - {metric: hero_amendment_count, op: "==", value: 3}
+      - {metric: hero_netsuite_amendments_behind, op: "==", value: 2}
+      - {metric: hero_salesforce_amendments_behind, op: "==", value: 1}
+      - {metric: hero_exposure_usd, op: ">=", value: 400000}
+      - {metric: netsuite_stale_amended_chains, op: ">=", value: 20}
+      - {metric: amended_vs_unamended_finding_ratio, op: ">=", value: 2.5}
+  - id: CP3
+    name: Contract billing milestones missing from the NetSuite billing schedule
+    hero: milestone-billed chains
+    targets:
+      - {metric: missing_milestones, op: ">=", value: 60}
+      - {metric: missing_milestone_usd, op: ">=", value: 3000000}
+  - id: CP4
+    name: "Findings split across the three owning teams; pharma carries the variance dollars; one account owner stands out"
+    hero: Dana Whitfield
+    targets:
+      - {metric: revenue_team_share, op: ">=", value: 0.20}
+      - {metric: revenue_team_share, op: "<=", value: 0.45}
+      - {metric: sales_ops_team_share, op: ">=", value: 0.20}
+      - {metric: sales_ops_team_share, op: "<=", value: 0.45}
+      - {metric: billing_team_share, op: ">=", value: 0.20}
+      - {metric: billing_team_share, op: "<=", value: 0.45}
+      - {metric: pharma_share_of_variance_usd, op: ">=", value: 0.6}
+      - {metric: hero_owner_rate_vs_average, op: ">=", value: 2.0}
+
+questions:
+  reviewed_queries: reviewed_queries.py
+  story_guide: 03_demo_story_guide.md
+  opening_questions: 3
+
+# Story documents: rendered to PDF and attached to the domain for chat.
+documents:
+  - {spec: docs/q2_2026_close_memo_contract_reconciliation.md, kind: memo}
+  - {spec: docs/order_to_cash_reconciliation_policy_and_control_matrix.md, kind: playbook}
+  - {spec: docs/boomi_sync_incident_bulletin_2026_03.md, kind: bulletin}
+
+# Authored assets for the context extractor (the only way context enters the domain).
+context_assets:
+  - {spec: docs/reconciliation_metric_definitions_v1_4.md, kind: standard}
+  - {spec: docs/business_glossary_and_ownership_register.md, kind: glossary}
+  - {spec: docs/data_platform_wiki_meridian_poc_onboarding.md, kind: wiki}
+  - {spec: docs/close_reconciliation_channel_export.md, kind: chat_export}
+  - {spec: docs/q2_2026_close_memo_contract_reconciliation.md, kind: memo}
+  - {spec: docs/order_to_cash_reconciliation_policy_and_control_matrix.md, kind: playbook}
+  - {spec: docs/boomi_sync_incident_bulletin_2026_03.md, kind: bulletin}
+
+live_app:
+  name: Contract Reconciliation Review
+  prompt: live_app_prompt.md
+  tabs: [Findings Queue, Case Review, Export]
+
+chat:
+  followup_question: Show me the full amendment lineage for Halvorsen Therapeutics and where Salesforce and NetSuite each stand relative to the latest amendment and what the dollar exposure is
+  expected_points:
+    - "four signed versions - the original agreement and three amendments with Amendment 3 (A3) the latest"
+    - "Salesforce is at Amendment 2 (A2) so Amendment 3 is missing from Salesforce"
+    - "NetSuite is at Amendment 1 (A1) and carries two sales orders"
+    - "11 findings on the Halvorsen agreement"
+    - "total exposure about 2.32 million dollars (480 thousand between the contract and NetSuite plus 120 thousand overstated in Salesforce plus four missing milestones)"
+
+agent:
+  name: Amendment Sync Watch
+  prompt: agent_prompt.md
+  enabled: false
+
+wisdom:
+  deployment: proddemo
+  workspace_id: ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024   # Default Organization (user's choice; not Certified Demos)
+  connection: {name: Snowflake Demo}                           # existing shared connection; MERIDIAN_POC added to its filter by hand
+  domain_name: Meridian Clinician Network
+  domain_description: Fictional professional network for US clinicians. Three-way contract reconciliation across DocuSign (extracted contract terms) Salesforce (closed-won opportunities) and NetSuite (sales orders and billing). Demo today is 2026-09-30 (Q3 2026 quarter end); data spans 2024-01-01 to 2026-09-30. Snowflake MERIDIAN_POC.ANALYTICS.
+  dialect: snowflake
+  bootstrap: 02_wace_bootstrap.md
+  knowledge_csv: knowledge.csv
+  metrics_csv: metrics.csv
+  reviewed_by:
+  lookup_columns: [CUSTOMERS.CUSTOMER_NAME, CUSTOMERS.ACCOUNT_OWNER, CONTRACTS.CONTRACT_NUMBER, PRODUCTS.PRODUCT_NAME, RECONCILIATION_CONTROLS.CHECK_TYPE]
+  eval: {run_count: 3, experimental_mode: EXPERIMENTAL_MODE_NONE, pass_threshold: 0.9}
+  context_mode: extractor
+  extraction: {accept: [knowledge, synonyms, metrics, reviewed_queries], coverage_threshold: 0.9, batch_size: 3}   # at most 3 files per extraction run (user's call 2026-10-15)
+
+script:
+  template: docs/templates/demo_script_example.md
+  output: DEMO_SCRIPT.md
+
+# Stretch (only after the structured path is done): contract PDFs in S3 attached to the domain.
+s3:
+  bucket_env: S3_BUCKET            # bucket, region and prefix come from .env (S3_BUCKET, S3_REGION, S3_PREFIX_for_contracts)
+  prefix_env: S3_PREFIX_for_contracts
+  region_env: S3_REGION
+generated_documents:
+  module: contract_pdfs.py        # renders the Halvorsen chain + ~20 other contracts from the generated frames
+  out: build/contracts
+
+manual_steps:
+  - Add MERIDIAN_POC to the database filter of the "Snowflake Demo" connection in Default Organization (done in the browser during the build, never by the pipeline).
+  - The S3 connectivity test left a 2-byte marker at meridian_contracts/_connectivity_check.txt (the uploader key cannot delete); remove it by hand if wanted.
