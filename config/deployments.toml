@@ -15,3 +15,11 @@ tenant = "gowisdomstaging"          # key env name only; host overrides the askw
 host = "staging.gowisdom.ai"        # -> https://staging.gowisdom.ai/graphql
 key_env = "staging.gowisdom_key"    # the var name used in .env (note the dot)
 description = "gowisdom.ai STAGING — optional, for testing publish flows away from proddemo"
+
+[deployments.digitz]
+tenant = "digitz"                   # key env name only; host overrides the askwisdom.ai URL
+host = "digitz.wisdom.ai"           # -> https://digitz.wisdom.ai/graphql
+key_env = "digitz_api_key"          # the var name used in .env
+workspace_id = "ET_WORKSPACE_01dc4f2105194dc286b9d69df2a89024"
+workspace_name = "WisdomAI"
+description = "Digitz — WisdomAI partner tenant; we extend an EXISTING domain here (not Certified Demos)"

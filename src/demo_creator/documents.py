@@ -135,6 +135,15 @@ def render_all(spec, *, echo: bool = True) -> list[dict]:
         src = spec.dir / d["spec"]
         pdf = spec.paths.docs_out / (Path(d["spec"]).stem + ".pdf")
         try:
+            from .context_assets import TEXT_KINDS, asset_output_path
+            if str(d.get("kind") or "") in TEXT_KINDS:   # uploaded as the text itself (.sql / .txt), never a PDF
+                pdf = asset_output_path(spec, d)
+                pdf.parent.mkdir(parents=True, exist_ok=True)
+                pdf.write_text(src.read_text())
+                out.append({"spec": d["spec"], "pdf": str(pdf), "kind": d.get("kind"), "ok": True})
+                if echo:
+                    print(f"  copied {pdf.name} ({pdf.stat().st_size:,} bytes)")
+                continue
             render_pdf(src, pdf, title=d.get("title"))
             out.append({"spec": d["spec"], "pdf": str(pdf), "kind": d.get("kind"), "ok": True})
             if echo:

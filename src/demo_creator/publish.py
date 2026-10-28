@@ -62,6 +62,7 @@ class Publisher:
             except Exception:  # noqa: BLE001
                 self.workspace_label = None
         self.workspace_label = self.workspace_label or self.workspace_id
+        self.existing = bool(spec.wisdom.existing_domain)
         self.reports: list[StepReport] = []
 
     # ---- plumbing ----
@@ -78,7 +79,8 @@ class Publisher:
         return r
 
     def _announce(self, op: str, effect: str) -> None:
-        self._say(f"  -> {op}: {effect}  [{self.dep.name} / {self.workspace_label}]")
+        tag = f"{self.dep.name} / {self.workspace_label}" + (f" / EXISTING domain {self.spec.wisdom.domain_name}" if self.existing else "")
+        self._say(f"  -> {op}: {effect}  [{tag}]")
 
     @property
     def domain_id(self) -> str | None:
@@ -96,10 +98,19 @@ class Publisher:
             raise
         db = self.spec.snowflake.database
         if conn:
-            self.state.set("wisdom", "connection_id", conn.id)
+            ours = self.state.wisdom.get("connection_id") == conn.id and bool(self.state.wisdom.get("connection_created"))
             if conn.database_filters and db not in conn.database_filters:
+                if self.existing and not ours:
+                    # updateConnection re-sends credentials: never do that to a connection somebody else owns
+                    return self._report("connection", "failed",
+                                        f"'{name}' exists in this workspace ({conn.id}) but was not created by this demo and its database "
+                                        f"filter lacks {db}; pick another wisdom.connection.name or add {db} to it by hand in Wisdom")
+                self.state.set("wisdom", "connection_id", conn.id)
                 return self._extend_database_filter(conn, db)
+            self.state.set("wisdom", "connection_id", conn.id)
             return self._report("connection", "ok", f"'{name}' exists ({conn.id})", connection_id=conn.id, created=False)
+        if not self.spec.wisdom.connection_create:
+            return self._report("connection", "failed", f"connection '{name}' does not exist and wisdom.connection.create is false")
         # The service user the Wisdom connection logs in as (the existing "Snowflake Demo"
         # connection uses WISDOMAI_PROD with a programmatic access token). Secrets come
         # from .env only; a PAT is preferred, a password works too.
@@ -124,6 +135,7 @@ class Publisher:
             return self._report("connection", "planned", f"would create '{name}'")
         created = self.client.create_connection(details, workspace_id=self.workspace_id)
         self.state.set("wisdom", "connection_id", created["id"])
+        self.state.set("wisdom", "connection_created", True)
         return self._report("connection", "ok", f"created '{name}' ({created['id']})", connection_id=created["id"], created=True)
 
     def wait_for_connection_sync(self, connection_id: str, *, wait_s: int = 600) -> dict:
@@ -195,7 +207,24 @@ class Publisher:
                             connection_id=conn.id, created=False, filters=list(back.database_filters) if back else [])
 
     # ---- 2. domain ----
+    def _ensure_existing_domain(self) -> StepReport:
+        """Existing-domain mode: resolve wisdom.domain_id in the workspace, insist the live name
+        matches wisdom.domain_name (a guard against a wrong id) and never create anything."""
+        want = self.spec.wisdom.domain_id
+        name = self.spec.wisdom.domain_name
+        live = next((d for d in self.client.list_domains(workspace_id=self.workspace_id, limit=500) if d.get("id") == want), None)
+        if live is None:
+            raise PublishError(f"existing domain {want} not found in workspace {self.workspace_label} on {self.dep.name}")
+        if str(live.get("name", "")).strip().lower() != name.strip().lower():
+            raise PublishError(f"refusing to touch {want}: it is named '{live.get('name')}' but demo.yaml says '{name}'")
+        self.state.set("wisdom", "domain_id", want)
+        self.state.set("wisdom", "domain_owned", False)
+        return self._report("domain", "ok", f"EXISTING domain '{live.get('name')}' ({want}) — additive only; never created, renamed or deleted by this demo",
+                            domain_id=want, created=False, existing=True)
+
     def ensure_domain(self) -> StepReport:
+        if self.existing:
+            return self._ensure_existing_domain()
         name = self.spec.wisdom.domain_name
         existing = None
         for d in self.client.list_domains(workspace_id=self.workspace_id, limit=500):
@@ -212,6 +241,7 @@ class Publisher:
             return self._report("domain", "planned", f"would create '{name}'")
         created = self.client.create_domain(name, self.spec.wisdom.domain_description, workspace_id=self.workspace_id)
         self.state.set("wisdom", "domain_id", created["id"])
+        self.state.set("wisdom", "domain_owned", True)
         return self._report("domain", "ok", f"created '{name}' ({created['id']})", domain_id=created["id"], created=True)
 
     # ---- 3. database ----
@@ -223,8 +253,33 @@ class Publisher:
         have = sorted({t["name"].upper() for t in tables if str(t.get("database", "")).upper() == db})
         if have:
             missing = [t for t in self.spec.tables + self.spec.snowflake.views if t not in have]
-            return self._report("database", "ok", f"{db} attached with {len(have)} tables/views" + (f"; not yet visible: {missing}" if missing else ""),
-                                tables=len(have), missing=missing)
+            if not missing:
+                return self._report("database", "ok", f"{db} attached with {len(have)} tables/views", tables=len(have), missing=[])
+            # Additive path (a revision added tables/views after the first publish): attach only the missing ones.
+            conn_id = self.state.wisdom.get("connection_id")
+            self._announce("updateDomainRelationshipGraphDeltas", f"attach {len(missing)} new objects from {db}: {', '.join(missing)}")
+            if not self.apply:
+                return self._report("database", "planned", f"{db} attached with {len(have)}; would attach {missing}", tables=len(have), missing=missing)
+            if not conn_id:
+                raise PublishError("no connection id — run the connection step first")
+            hierarchy = [t for t in self.client.database_hierarchy(conn_id, db) if t["schema"].upper() == self.spec.snowflake.schema]
+            ids = [t["id"] for t in hierarchy if t["name"].upper() in set(missing)]
+            not_found = sorted(set(missing) - {t["name"].upper() for t in hierarchy})
+            if not_found:
+                return self._report("database", "failed", f"connection {conn_id} does not expose {not_found} yet — refresh the connection (grants? filter?) and re-run",
+                                    tables=len(have), missing=missing)
+            self.client.add_tables_to_domain(self.domain_id, ids)
+            deadline = time.time() + wait_s
+            while time.time() < deadline:
+                tables = self.client.list_tables(self.domain_id)
+                have = sorted({t["name"].upper() for t in tables if str(t.get("database", "")).upper() == db})
+                if all(m in have for m in missing):
+                    break
+                time.sleep(5)
+            still = [t for t in missing if t not in have]
+            return self._report("database", "ok" if not still else "failed",
+                                f"{db}: attached {len(missing) - len(still)} new objects, now {len(have)} tables/views" + (f"; still missing {still}" if still else ""),
+                                tables=len(have), missing=still)
         conn_id = self.state.wisdom.get("connection_id")
         self._announce("addDatabaseToDomain", f"attach database {db} from connection {conn_id}")
         if not self.apply:
@@ -260,6 +315,75 @@ class Publisher:
         status = "ok" if have else "failed"
         return self._report("database", status, f"{db}: {len(have)} tables/views visible" + (f"; missing {missing}" if missing else ""),
                             tables=len(have), missing=missing)
+
+    # ---- 3b. federated sources: tables from OTHER connections, attached read-only ----
+    def attach_federated_sources(self, *, wait_s: int = 180) -> StepReport:
+        sources = self.spec.wisdom.federated_sources
+        if not sources:
+            return self._report("federated", "ok", "no wisdom.federated_sources in demo.yaml", sources=0)
+        if not self.domain_id:
+            return self._report("federated", "planned", f"would attach {sum(len(f.tables) for f in sources)} tables from {len(sources)} other connection(s) once the domain exists")
+        done = dict(self.state.wisdom.get("federated_sources") or {})
+        details: list[str] = []
+        attached_total = 0
+        for src in sources:
+            conn = self.client.find_connection(self.workspace_id, src.connection)
+            if conn is None:
+                raise PublishError(f"federated source connection '{src.connection}' not found in workspace {self.workspace_label} — it must already exist (the pipeline never creates it)")
+            wanted = {t.upper() for t in src.tables}
+            present = self.client.list_tables(self.domain_id)
+            have = sorted({t["name"].upper() for t in present if str(t.get("database", "")).upper() == src.database.upper() and t["name"].upper() in wanted})
+            missing = sorted(wanted - set(have))
+            if not missing:
+                details.append(f"{src.connection}/{src.database}: {len(have)} tables already attached")
+                done[src.connection] = {"connection_id": conn.id, "database": src.database, "tables": have, "dialect": src.dialect}
+                attached_total += len(have)
+                continue
+            self._announce("updateDomainRelationshipGraphDeltas", f"attach {len(missing)} read-only tables from '{src.connection}' ({src.database}): {', '.join(missing)}")
+            if not self.apply:
+                details.append(f"{src.connection}/{src.database}: would attach {len(missing)}")
+                continue
+            hierarchy = [t for t in self.client.database_hierarchy(conn.id, src.database)
+                         if src.schema is None or str(t.get("schema") or "").upper() == src.schema.upper()]
+            ids = [t["id"] for t in hierarchy if t["name"].upper() in missing]
+            not_found = sorted(set(missing) - {t["name"].upper() for t in hierarchy})
+            if not_found:
+                raise PublishError(f"'{src.connection}' does not expose {not_found} in {src.database} (exposed: {len(hierarchy)} tables) — check the names in wisdom.federated_sources")
+            self.client.add_tables_to_domain(self.domain_id, ids)
+            deadline = time.time() + wait_s
+            while time.time() < deadline:
+                present = self.client.list_tables(self.domain_id)
+                have = sorted({t["name"].upper() for t in present if str(t.get("database", "")).upper() == src.database.upper() and t["name"].upper() in wanted})
+                if len(have) == len(wanted):
+                    break
+                time.sleep(5)
+            still = sorted(wanted - set(have))
+            if still:
+                raise PublishError(f"'{src.connection}': {still} not visible in the domain after {wait_s}s")
+            done[src.connection] = {"connection_id": conn.id, "database": src.database, "tables": have, "dialect": src.dialect}
+            details.append(f"{src.connection}/{src.database}: attached {len(missing)} (now {len(have)})")
+            attached_total += len(have)
+        if self.apply:
+            self.state.set("wisdom", "federated_sources", done)
+            self._sync_federated_reviewed_queries(done, details)
+        return self._report("federated", "ok" if self.apply else "planned", "; ".join(details), sources=len(sources), tables=attached_total)
+
+    def _sync_federated_reviewed_queries(self, done: dict, details: list[str]) -> None:
+        """Reviewed queries with `source=<connection>` are bound to THAT connection and dialect. They
+        cannot travel through the context extractor (its reviewed-query suggestions bind to the demo's
+        warehouse connection), so this is the one place reviewed SQL is pushed directly."""
+        if self.registry is None:
+            return
+        existing = {str(r.get("question", "")).strip() for r in self.client.list_reviewed_queries(self.domain_id, limit=500)}
+        for name, info in done.items():
+            sub = self.registry.for_source(name)
+            items = [it for it in to_api_items(sub, info["dialect"], connection_id=info["connection_id"]) if it["query"].strip() not in existing]
+            if not items:
+                continue
+            self._announce("addSqlReviewedQueries", f"add {len(items)} reviewed queries bound to '{name}' (dialect {info['dialect']})")
+            for i in range(0, len(items), 20):
+                self.client.add_sql_reviewed_queries(self.domain_id, items[i:i + 20], dialect=info["dialect"], connection_id=info["connection_id"])
+            details.append(f"{name}: {len(items)} reviewed queries bound")
 
     # ---- 4. knowledge ----
     def knowledge_entries(self) -> list[dict]:
@@ -300,7 +424,7 @@ class Publisher:
     def sync_reviewed_queries(self, registry: Registry) -> StepReport:
         if (skip := self._extractor_only("reviewed_queries")):
             return skip
-        items = to_api_items(registry, self.spec.wisdom.dialect)
+        items = to_api_items(registry.local(), self.spec.wisdom.dialect)
         if not self.domain_id:
             return self._report("reviewed_queries", "planned", f"would add {len(items)} reviewed queries once the domain exists")
         existing = {str(r.get("question", "")).strip() for r in self.client.list_reviewed_queries(self.domain_id, limit=500)}
@@ -396,22 +520,42 @@ class Publisher:
         sections = bootstrap_sections(self.spec.bootstrap_path.read_text())
         keep = ("domain overview", "entity relationship", "business nuances", "query routing")
         parts = [f"## {title.title()}\n{body}" for title, body in sections.items() if any(k in title for k in keep)]
+        fed = ""
+        for src in self.spec.wisdom.federated_sources:
+            fed += (f" Federated source '{src.connection}' ({src.dialect} dialect; database {src.database}; tables "
+                    f"{', '.join(src.tables)}): {src.description or 'read-only tables from another system'} "
+                    f"Query it in {src.dialect} SQL on its own connection and combine results with the Snowflake data in the analysis step.")
         text = (f"Demo as-of date: {self.spec.as_of.isoformat()}. Data spans {self.spec.data_start.isoformat()} to {self.spec.as_of.isoformat()}. "
-                f"Warehouse: Snowflake {self.spec.qualified_schema}.\n\n" + "\n\n".join(parts))
+                f"Warehouse: Snowflake {self.spec.qualified_schema}.{fed}\n\n" + "\n\n".join(parts))
         return text[:12000]
 
     def sync_instructions(self) -> StepReport:
+        mode = self.spec.wisdom.instructions_mode
+        if mode == "skip":
+            return self._report("instructions", "skipped", "wisdom.instructions_mode is skip — the domain's instructions are left exactly as they are")
         text = self.instructions_text()
         if not self.domain_id:
             return self._report("instructions", "planned", f"would set {len(text)} chars of domain instructions once the domain exists")
-        current = self.client.domain_system_instructions(self.domain_id)
+        current = self.client.domain_system_instructions(self.domain_id) or ""
+        if mode == "append":
+            # Only our delimited block ever changes; everything outside it is preserved byte for byte.
+            begin, end = f"<!-- demo:{self.spec.name} begin -->", f"<!-- demo:{self.spec.name} end -->"
+            block = f"{begin}\n{text.strip()}\n{end}"
+            if begin in current and end in current:
+                head, rest = current.split(begin, 1)
+                _, tail = rest.split(end, 1)
+                text = head.rstrip() + "\n\n" + block + tail
+            else:
+                text = (current.rstrip() + "\n\n" if current.strip() else "") + block
         if current.strip() == text.strip():
             return self._report("instructions", "ok", "domain instructions already up to date", chars=len(text))
-        self._announce("updateDomainConfig", f"set domainSystemInstructions ({len(text)} chars{', replacing ' + str(len(current)) + ' chars' if current else ''})")
+        effect = (f"append our delimited block to domainSystemInstructions ({len(current)} chars kept)" if mode == "append"
+                  else f"set domainSystemInstructions ({len(text)} chars{', replacing ' + str(len(current)) + ' chars' if current else ''})")
+        self._announce("updateDomainConfig", effect)
         if not self.apply:
-            return self._report("instructions", "planned", f"would set {len(text)} chars")
+            return self._report("instructions", "planned", f"would {effect}")
         self.client.update_domain_config(self.domain_id, {"domainSystemInstructions": text})
-        return self._report("instructions", "ok", f"set {len(text)} chars of domain instructions", chars=len(text))
+        return self._report("instructions", "ok", f"{'appended our block to' if mode == 'append' else 'set'} domain instructions ({len(text)} chars)", chars=len(text))
 
     # ---- 9. documents (unstructured files stored in the domain) ----
     def upload_documents(self) -> StepReport:
@@ -456,13 +600,25 @@ class Publisher:
             if "files" not in attached:
                 return self._report("extraction", "failed", f"'files' source not attached after attachContextExtractionConnection (have {attached})")
         already = {f["fileName"]: f for f in self.client.context_extraction_uploaded_files(self.domain_id, "files")}
-        # generated assets are re-uploaded when their content changed (replace the stored copy); authored PDFs once
+        uploaded_by_us = self.state.wisdom.get("extraction_uploaded") or {}
+        # a file is (re-)uploaded when the domain lacks it or when its content changed since we uploaded it
+        # (generated assets: the rendered file; authored assets: the markdown/text source, since PDF bytes vary per render)
         todo = []
         for f in files:
             if f.path.name not in already:
                 todo.append(f)
-            elif f.generated and self.state.wisdom.get("extraction_uploaded", {}).get(f.path.name) != _digest(f.path):
+            elif f.path.name in uploaded_by_us and uploaded_by_us.get(f.path.name) != _digest(f.digest_path):
                 todo.append(f)
+        foreign = [f.path.name for f in todo if f.path.name in already and f.path.name not in uploaded_by_us]
+        if foreign:
+            return self._report("extraction", "failed", f"{foreign} already exist in the domain's extractor and were not uploaded by this demo — rename the asset(s)")
+        # Pending suggestions that existed before our first upload are somebody else's: remember them once so
+        # acceptance can leave them untouched whatever the run filter does.
+        if self.apply and self.state.wisdom.get("suggestions_preexisting") is None:
+            pre = sorted(s["id"] for s in self.client.modeling_suggestions(self.domain_id, include_all_statuses=True) if "PENDING" in str(s.get("status", "")))
+            self.state.set("wisdom", "suggestions_preexisting", pre)
+            if pre:
+                self._say(f"  note: {len(pre)} pending suggestions already in the domain are recorded and will never be accepted by this demo")
         if todo:
             self._announce("registerContextExtractionUploadedFiles", f"upload {len(todo)} files to the context extractor: {[f.path.name for f in todo]}")
             if not self.apply:
@@ -471,26 +627,68 @@ class Publisher:
                 if f.path.name in already:
                     self.client.delete_context_extraction_uploaded_file(self.domain_id, already[f.path.name]["sourceFileId"])
                 self.client.upload_context_documents(self.domain_id, [f.path], instructions=f.instructions, acceptance="DO_NOT_AUTO_ACCEPT")
-                self.state.set("wisdom", "extraction_uploaded", {**(self.state.wisdom.get("extraction_uploaded") or {}), f.path.name: _digest(f.path)})
+                self.state.set("wisdom", "extraction_uploaded", {**(self.state.wisdom.get("extraction_uploaded") or {}), f.path.name: _digest(f.digest_path)})
             after = {f["fileName"] for f in self.client.context_extraction_uploaded_files(self.domain_id, "files")}
             missing = [f.path.name for f in todo if f.path.name not in after]
             if missing:
                 return self._report("extraction", "failed", f"uploaded files not registered: {missing}")
-        run_id = self.state.wisdom.get("extraction_run_id")
-        if run_id and not todo:
-            status = self._extraction_status(run_id)
-            if status and "RUNNING" in status:
-                self._say(f"  extraction {run_id} still running — waiting")
-                rep = self._wait_extraction(run_id, wait_s, uploaded=0)
-                return self._finish_extraction(rep) if rep.status == "ok" else rep
-            if status and "SUCCESS" in status and self.state.wisdom.get("extraction_coverage"):
-                return self._report("extraction", "ok", f"extraction run {run_id} already {status}", uploaded=0, run_id=run_id, job_status=status,
-                                    coverage=self.state.wisdom.get("extraction_coverage"))
-        self._announce("triggerKnowledgeExtraction", f"extract {ALL_AGENTS} from {len(files)} uploaded files")
+        batch = int(self.spec.wisdom.extraction.get("batch_size") or 0)
+        names = [f.path.name for f in files]
+        # Runs already triggered for these files (resume support): a file is covered when a run
+        # that included it succeeded or is still running, unless the file was just re-uploaded.
+        runs: dict = dict(self.state.wisdom.get("extraction_runs") or {})
+        statuses = {r["jobRun"]["jobRunId"]: (r["jobRun"]["status"] or "") for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50)}
+        changed = {f.path.name for f in todo}
+        covered, active = set(), []
+        for rid, info in runs.items():
+            st = statuses.get(rid, "")
+            if "SUCCESS" in st:
+                covered |= set(info.get("files") or [])
+            elif "RUNNING" in st or "PENDING" in st or "QUEUED" in st:
+                covered |= set(info.get("files") or [])
+                active.append(rid)
+        covered -= changed
+        pending = [n for n in names if n not in covered]
+        if not pending and not active and self.state.wisdom.get("extraction_coverage"):
+            return self._report("extraction", "ok", "extraction already complete for every file", uploaded=0,
+                                coverage=self.state.wisdom.get("extraction_coverage"))
+        chunks = [pending[i:i + batch] for i in range(0, len(pending), batch)] if batch > 0 else ([pending] if pending else [])
+        if chunks:
+            self._announce("triggerKnowledgeExtraction", f"extract {ALL_AGENTS} from {len(pending)} uploaded files"
+                           + (f" in {len(chunks)} concurrent runs of at most {batch} files" if batch > 0 else ""))
         if not self.apply:
-            return self._report("extraction", "planned", "would trigger extraction")
-        rep = self._trigger_and_wait([f.path.name for f in files], wait_s, uploaded=len(todo))
-        return self._finish_extraction(rep) if rep.status == "ok" else rep
+            return self._report("extraction", "planned", f"would trigger {len(chunks)} extraction run(s)" + (f" and wait on {len(active)} running" if active else ""))
+        # trigger every batch first (runs execute concurrently on the platform), then wait on all of them
+        for i, chunk in enumerate(chunks, 1):
+            rid = self._trigger(chunk)
+            if rid is None:
+                return self._report("extraction", "failed", f"extraction run {i}/{len(chunks)} did not appear within 180s of the trigger")
+            self._say(f"  extraction run {i}/{len(chunks)} {rid}: {chunk}")
+            runs[rid] = {"files": chunk}
+            active.append(rid)
+            self.state.set("wisdom", "extraction_runs", runs)
+            self.state.set("wisdom", "extraction_run_id", rid)
+        rep = None
+        for rid in active:
+            rep = self._wait_extraction(rid, wait_s, uploaded=len(todo))
+            if rep.status != "ok":
+                return rep
+        return self._finish_extraction(rep)
+
+    def _trigger(self, file_names: list[str], *, force_full: bool | None = None) -> str | None:
+        """Trigger one extraction run for `file_names`; returns its run id (found by diffing the
+        run list, the mutation returns nothing useful) or None after 180 s."""
+        from .context_assets import ALL_AGENTS
+
+        before = {r["jobRun"]["jobRunId"] for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50)}
+        self.client.trigger_knowledge_extraction(self.domain_id, "files", file_names, agent_types=ALL_AGENTS, force_full=force_full)
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            new = [r for r in self.client.knowledge_extraction_runs(self.domain_id, limit=50) if r["jobRun"]["jobRunId"] not in before]
+            if new:
+                return new[0]["jobRun"]["jobRunId"]
+            time.sleep(5)
+        return None
 
     def _trigger_and_wait(self, file_names: list[str], wait_s: int, *, uploaded: int, force_full: bool | None = None) -> StepReport:
         from .context_assets import ALL_AGENTS
@@ -515,19 +713,39 @@ class Publisher:
         full re-extraction when coverage is short, then report — never fall back to CSV."""
         from .context_assets import ACCEPT_DEFAULT, accept_suggestions, coverage, extraction_files
 
+        if rep is None:   # resumed after every run had already finished (e.g. a network drop before coverage was read)
+            rep = StepReport("extraction", "ok", "resumed: all runs finished", {})
         families = list(self.spec.wisdom.extraction.get("accept") or ACCEPT_DEFAULT)
         threshold = float(self.spec.wisdom.extraction.get("coverage_threshold", 0.9))
-        acc = accept_suggestions(self.client, self.domain_id, families)
-        self._say(f"  accepted {acc['accepted']} suggestions ({acc['by_family']}); {acc['left_pending']} left pending for steward review")
+        scope = dict(job_run_ids=list((self.state.wisdom.get("extraction_runs") or {}).keys()),
+                     exclude_ids=set(self.state.wisdom.get("suggestions_preexisting") or []))
+        acc = accept_suggestions(self.client, self.domain_id, families, **scope)
+        self._remember_accepted(acc)
+        self._say(f"  accepted {acc['accepted']} suggestions ({acc['by_family']}); {acc['left_pending']} left pending for steward review"
+                  + (f"; scoped to {len(scope['job_run_ids'])} run(s), {len(scope['exclude_ids'])} pre-existing untouched" if self.existing else ""))
         cov = coverage(self.client, self.domain_id, self.spec, self.registry)
         short = [k for k in ("metrics", "reviewed_queries") if cov[k]["expected"] and cov[k]["coverage"] < threshold]
         if short and not self.state.wisdom.get("extraction_retried"):
             self._say(f"  coverage short on {short} ({ {k: cov[k]['coverage'] for k in short} }) — one full re-extraction")
             self.state.set("wisdom", "extraction_retried", True)
-            rep2 = self._trigger_and_wait([f.path.name for f in extraction_files(self.spec, self.registry)], 1500, uploaded=0, force_full=True)
-            if rep2.status != "ok":
-                return rep2
-            acc2 = accept_suggestions(self.client, self.domain_id, families)
+            names2 = [f.path.name for f in extraction_files(self.spec, self.registry)]
+            batch = int(self.spec.wisdom.extraction.get("batch_size") or 0)
+            rids = []
+            for chunk in ([names2[i:i + batch] for i in range(0, len(names2), batch)] if batch > 0 else [names2]):
+                rid = self._trigger(chunk, force_full=True)
+                if rid is None:
+                    return self._report("extraction", "failed", "re-extraction run did not appear within 180s of the trigger")
+                rids.append(rid)
+                runs_state = dict(self.state.wisdom.get("extraction_runs") or {})
+                runs_state[rid] = {"files": chunk, "full": True}
+                self.state.set("wisdom", "extraction_runs", runs_state)
+            for rid in rids:
+                rep2 = self._wait_extraction(rid, 1500, uploaded=0)
+                if rep2.status != "ok":
+                    return rep2
+            scope["job_run_ids"] = list((self.state.wisdom.get("extraction_runs") or {}).keys()) + rids
+            acc2 = accept_suggestions(self.client, self.domain_id, families, **scope)
+            self._remember_accepted(acc2)
             acc["accepted"] += acc2["accepted"]
             cov = coverage(self.client, self.domain_id, self.spec, self.registry)
             short = [k for k in ("metrics", "reviewed_queries") if cov[k]["expected"] and cov[k]["coverage"] < threshold]
@@ -539,6 +757,10 @@ class Publisher:
                                             + "; ".join(f"{k}: {cov[k]['missing'][:8]}" for k in short))
         return self._report("extraction", status, detail, run_id=rep.data.get("run_id"), job_status=rep.data.get("job_status"),
                             accepted=acc, coverage=cov, uploaded=rep.data.get("uploaded"))
+
+    def _remember_accepted(self, acc: dict) -> None:
+        ids = sorted(set(self.state.wisdom.get("accepted_suggestion_ids") or []) | set(acc.get("accepted_ids") or []))
+        self.state.set("wisdom", "accepted_suggestion_ids", ids)
 
     def _wait_extraction(self, run_id: str, wait_s: int, *, uploaded: int) -> StepReport:
         deadline = time.time() + wait_s
@@ -561,13 +783,147 @@ class Publisher:
                 return r["jobRun"]["status"]
         return None
 
+    # ---- 10b. skills: every wisdom.skills[] file exists in the domain (extractor first, direct create as the fallback) ----
+    def sync_skills(self) -> StepReport:
+        from .spec import skill_frontmatter
+
+        wanted = list(self.spec.wisdom.skills)
+        if not wanted:
+            return self._report("skills", "ok", "no wisdom.skills in demo.yaml", skills=0)
+        if not self.domain_id:
+            return self._report("skills", "planned", f"would ensure {len(wanted)} skills once the domain exists: {[w.name for w in wanted]}")
+        have = {str(x.get("name", "")): x for x in self.client.list_domain_skills(self.domain_id, include_markdown=True)}
+        done = dict(self.state.wisdom.get("skills") or {})
+        details, created, updated, kept = [], 0, 0, 0
+        for sk in wanted:
+            path = self.spec.dir / sk.file
+            md = path.read_text()
+            fm = skill_frontmatter(md)
+            name = fm.get("name") or sk.name
+            cur = have.get(name)
+            if cur is None:
+                self._announce("createDomainSkill", f"create skill '{name}' from {sk.file} (availability {sk.availability})")
+                if not self.apply:
+                    details.append(f"{name}: would create")
+                    continue
+                back = self.client.create_domain_skill(self.domain_id, md, availability=sk.availability)
+                done[name] = {"id": back["id"], "version": back.get("version"), "via": "direct", "file": sk.file}
+                created += 1
+                details.append(f"{name}: created v{back.get('version')} ({back['id']})")
+            else:
+                via = (done.get(name) or {}).get("via") or ("extractor" if not done.get(name) else "direct")
+                if (cur.get("skillMarkdown") or "").strip() == md.strip():
+                    kept += 1
+                    done[name] = {"id": cur["id"], "version": cur.get("version"), "via": via, "file": sk.file}
+                    details.append(f"{name}: present v{cur.get('version')} via {via}")
+                    continue
+                if via == "extractor" and not done.get(name):
+                    # proposed by the context extractor (and accepted): keep its wording, that is the demo beat
+                    kept += 1
+                    done[name] = {"id": cur["id"], "version": cur.get("version"), "via": "extractor", "file": sk.file}
+                    details.append(f"{name}: present v{cur.get('version')} via extractor (wording differs from {sk.file}; kept)")
+                    continue
+                self._announce("updateDomainSkill", f"update skill '{name}' from {sk.file} (v{cur.get('version')})")
+                if not self.apply:
+                    details.append(f"{name}: would update")
+                    continue
+                back = self.client.update_domain_skill(self.domain_id, cur["id"], int(cur.get("version") or 1), md, availability=sk.availability)
+                done[name] = {"id": back["id"], "version": back.get("version"), "via": "direct", "file": sk.file}
+                updated += 1
+                details.append(f"{name}: updated to v{back.get('version')}")
+            if self.apply and not (have.get(name) or {}).get("isActive", True):
+                self.client.set_domain_skill_active(self.domain_id, done[name]["id"], True)
+        if self.apply:
+            # read-back verification: every skill present, active, and without dangling schema references
+            # (a skill that names a column on the wrong view is shown as "Stale" in the UI and never loads)
+            back = {str(x.get("name", "")): x for x in self.client.list_domain_skills(self.domain_id, include_markdown=False)}
+            missing = [sk.name for sk in wanted if sk.name not in back]
+            stale = {sk.name: back[sk.name].get("danglingSchemaRefs") for sk in wanted if sk.name in back and back[sk.name].get("danglingSchemaRefs")}
+            self.state.set("wisdom", "skills", done)
+            if missing:
+                return self._report("skills", "failed", f"not in the domain after sync: {missing}", skills=len(done))
+            if stale:
+                return self._report("skills", "failed", f"stale (dangling schema references, fix the wording): {stale}", skills=len(done), stale=stale)
+        return self._report("skills", "ok" if self.apply else "planned", "; ".join(details),
+                            skills=len(wanted), created=created, updated=updated, kept=kept)
+
+    # ---- 11. S3 dataset (stretch): the contract PDFs in the customer's bucket, read through Wisdom's S3 connection ----
+    def attach_s3_dataset(self, *, wait_s: int = 600) -> StepReport:
+        from .s3_sync import s3_settings
+
+        cfg = self.spec.raw.get("s3") or {}
+        if not cfg:
+            return self._report("s3_dataset", "ok", "no s3: block in demo.yaml", attached=False)
+        st = s3_settings(self.spec)
+        if not st["bucket"]:
+            return self._report("s3_dataset", "failed", "S3 bucket not configured in .env")
+        if not self.domain_id:
+            return self._report("s3_dataset", "planned", "would create the S3 connection and dataset once the domain exists")
+        conn_name = str(cfg.get("connection_name") or f"{self.spec.title} Contract Archive")
+        conn = self.client.find_connection(self.workspace_id, conn_name)
+        if conn:
+            conn_id = conn.id
+        else:
+            key = os.getenv("WISDOM_S3_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID")
+            secret = os.getenv("WISDOM_S3_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+            if not (key and secret):
+                return self._report("s3_dataset", "failed", "no AWS key in .env for the Wisdom S3 connection")
+            details = {"name": conn_name, "description": f"Signed contract PDFs for the {self.spec.title} demo (s3://{st['bucket']}/{st['key_prefix']}/)",
+                       "connectionType": "S3", "dataSourceType": "FILE",
+                       "s3": {"bucketName": st["bucket"], "region": st["region"], "authType": "S3_AUTH_TYPE_ACCESS_KEY", "awsAccessKeyId": key, "awsSecretAccessKey": secret}}
+            self._announce("connectionCreate", f"create S3 connection '{conn_name}' on bucket {st['bucket']}")
+            if not self.apply:
+                return self._report("s3_dataset", "planned", f"would create S3 connection '{conn_name}'")
+            conn_id = self.client.create_connection(details, workspace_id=self.workspace_id)["id"]
+        self.state.set("wisdom", "s3_connection_id", conn_id)
+        ds_name = str(cfg.get("dataset_name") or f"{self.spec.title} contracts")
+        existing = [d for d in self.client.connection_datasets(conn_id) if d["name"] == ds_name]
+        if existing:
+            ds_id = existing[0]["id"]
+        else:
+            self._announce("createConnectionDataset", f"dataset '{ds_name}' on prefix {st['key_prefix']}/")
+            if not self.apply:
+                return self._report("s3_dataset", "planned", f"would create dataset '{ds_name}'")
+            ds_id = self.client.create_connection_dataset(conn_id, ds_name, prefix=st["key_prefix"] + "/",
+                                                          description="Signed agreements and amendments (DocuSign archive)")["id"]
+        self.state.set("wisdom", "s3_dataset_id", ds_id)
+        refs = self.client.domain_dataset_references(self.domain_id)
+        have = [r for r in refs.get("references", []) if r["datasetId"] == ds_id]
+        if not have:
+            self._announce("setDomainDatasetReference", f"attach dataset {ds_id} (all files) to the domain")
+            if not self.apply:
+                return self._report("s3_dataset", "planned", "would attach the dataset to the domain")
+            self.client.set_domain_dataset_reference(self.domain_id, ds_id, active=True, expected_revision=0)
+        try:
+            self.client.trigger_dataset_crawl(ds_id, self.domain_id)
+        except GraphQLError as exc:
+            self._say(f"  note: triggerDatasetCrawl: {str(exc)[:160]}")
+        deadline = time.time() + wait_s
+        state = {}
+        while time.time() < deadline:
+            state = self.client.connection_dataset_state(ds_id)
+            refs = self.client.domain_dataset_references(self.domain_id)
+            ref = next((r for r in refs.get("references", []) if r["datasetId"] == ds_id), None)
+            self._say(f"  dataset {ds_id}: files {state.get('totalFiles')} extracted {state.get('extractedFiles')} crawl {(state.get('dataset') or {}).get('crawlJobStatus')}; domain pending {refs.get('pendingFiles')} failed {refs.get('failedFiles')}")
+            if (state.get("totalFiles") or 0) > 0 and ref and not ref.get("indexingPending") and not refs.get("pendingFiles"):
+                break
+            time.sleep(20)
+        ref = next((r for r in self.client.domain_dataset_references(self.domain_id).get("references", []) if r["datasetId"] == ds_id), None)
+        ok = bool(ref and ref.get("active"))
+        return self._report("s3_dataset", "ok" if ok else "failed",
+                            f"connection {conn_id}, dataset {ds_id}: {state.get('totalFiles')} files seen, {state.get('extractedFiles')} extracted; domain reference {'active' if ok else 'missing'}"
+                            + (f" (indexing still pending)" if ref and ref.get("indexingPending") else ""),
+                            connection_id=conn_id, dataset_id=ds_id, files=state.get("totalFiles"), extracted=state.get("extractedFiles"),
+                            indexing_pending=bool(ref and ref.get("indexingPending")))
+
     # ---- orchestration ----
     def run(self, registry: Registry, *, steps: list[str] | None = None) -> list[StepReport]:
         self.registry = registry
         order = [("connection", self.ensure_connection), ("domain", self.ensure_domain), ("database", self.attach_database),
-                 ("instructions", self.sync_instructions), ("knowledge", self.sync_knowledge), ("metrics", self.sync_metrics),
+                 ("federated", self.attach_federated_sources), ("instructions", self.sync_instructions), ("knowledge", self.sync_knowledge), ("metrics", self.sync_metrics),
                  ("reviewed_queries", lambda: self.sync_reviewed_queries(registry)), ("lookup", self.sync_lookup_columns),
-                 ("documents", self.upload_documents), ("extraction", self.extract_context_assets)]
+                 ("documents", self.upload_documents), ("extraction", self.extract_context_assets), ("skills", self.sync_skills),
+                 ("s3_dataset", self.attach_s3_dataset)]
         for name, fn in order:
             if steps and name not in steps:
                 continue

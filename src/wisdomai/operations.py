@@ -229,6 +229,7 @@ query Connections($workspaceID: ID) {
         dataSourceType
         connectionType
         snowflake { account warehouse user role databaseFilters }
+        teradata { host port username databaseFilters }
       }
     }
   }
@@ -561,15 +562,14 @@ mutation PauseScheduledEval($domainId: String!, $evalSetId: String!) {
 }
 """
 
+# includeSchemaAnalysis was removed from the live schema on proddemo (verified 2026-10-16).
 TRIGGER_EVAL_ANALYSIS = """
 mutation TriggerEvalAnalysis(
   $domainId: String!
-  $includeSchemaAnalysis: Boolean
   $requireRqEval: Boolean
 ) {
   triggerEvalAnalysis(
     domainId: $domainId
-    includeSchemaAnalysis: $includeSchemaAnalysis
     requireRqEval: $requireRqEval
   ) {
     status message evalRunId runGroupId
@@ -754,6 +754,7 @@ query GetModelingSuggestions($domainId: ID!, $includeAllStatuses: Boolean, $jobR
         addReviewedQuery { question code }
         addMissingJoin { leftSourceId rightSourceId relationshipType }
         textSuggestion { suggestion explanation }
+        upsertSkill { skillId name newMarkdown baseVersion }
       }
     }
   }
@@ -973,9 +974,30 @@ mutation CreateConversationFull($domainId: String, $hidden: Boolean!, $workspace
 """
 
 # Agents (workflow agents built from a prompt)
+# 2026-10-26: the result lost `workflowJson agentName` and now returns a full
+# `specification: AnalysisScheduleTask` (the shape createWorkflowAgent takes as input).
 GENERATE_WORKFLOW_FROM_PROMPT = """
 mutation GenerateWorkflowFromPrompt($input: GenerateWorkflowFromPromptInput!) {
-  generateWorkflowFromPrompt(input: $input) { workflowJson agentName message }
+  generateWorkflowFromPrompt(input: $input) {
+    message
+    specification {
+      agentName analysisDomainId analysisDescription useDeepAnalysis instruction triggerCriteria
+      workflow {
+        nodes {
+          id type title positionX positionY handle
+          instruction { ops { insert { text } } }
+          config {
+            domainId triggerType
+            timing { intervalInMins startTime cronExpression cronTimezone }
+            delivery { type emailConfig { toEmailIds } slackConfig { channelNames } teamsConfig { userEmails } webhookConfig { webhookUrls } }
+            routeMap { condition { ops { insert { text } } } edgeId branchIndex }
+          }
+        }
+        edges { id fromNodeId toNodeId }
+        canvasAnnotation { notes { id text positionX positionY } }
+      }
+    }
+  }
 }
 """
 
@@ -1077,7 +1099,89 @@ mutation DeleteApp($appId: ID!) { deleteApp(appId: $appId) { code message } }
 CONNECTION_UPDATE = """
 mutation ConnectionUpdate($id: ID!, $details: ConnectionDetailsInput!, $skipValidation: Boolean) {
   connectionUpdate(id: $id, details: $details, skipValidation: $skipValidation) {
-    id details { name snowflake { databaseFilters } }
+    id details { name snowflake { databaseFilters } teradata { databaseFilters } }
+  }
+}
+"""
+
+
+# ---------------------------------------------------------------- S3 datasets (unstructured files in the customer's bucket)
+# connectionCreate(details: ConnectionDetailsInput{connectionType: S3, dataSourceType: FILE, s3: S3ConnectionConfigInput})
+# -> createConnectionDataset(connectionId, dataset: DatasetInput{name, s3DatasetConfigurationV2{connectionId, prefix}})
+# -> triggerDatasetCrawl(datasetId, domainId) -> setDomainDatasetReference(input: DomainDatasetReferenceInput)
+# -> read back domainDatasetReferences(domainId). Verified on proddemo 2026-10-16 by introspection.
+CREATE_CONNECTION_DATASET = """
+mutation CreateConnectionDataset($connectionId: ID!, $dataset: DatasetInput!) {
+  createConnectionDataset(connectionId: $connectionId, dataset: $dataset) { id name ownerConnectionId crawlJobStatus extractionTableName }
+}
+"""
+
+CONNECTION_DATASETS = """
+query ConnectionDatasets($connectionId: ID!) {
+  connectionDatasets(connectionId: $connectionId) { id name ownerConnectionId crawlJobStatus extractionTableName }
+}
+"""
+
+TRIGGER_DATASET_CRAWL = """
+mutation TriggerDatasetCrawl($datasetId: String!, $domainId: String!) {
+  triggerDatasetCrawl(datasetId: $datasetId, domainId: $domainId) { status { code message } }
+}
+"""
+
+SET_DOMAIN_DATASET_REFERENCE = """
+mutation SetDomainDatasetReference($input: DomainDatasetReferenceInput!) {
+  setDomainDatasetReference(input: $input) { domainId datasetId revision active indexingPending indexingError }
+}
+"""
+
+DOMAIN_DATASET_REFERENCES = """
+query DomainDatasetReferences($domainId: ID!) {
+  domainDatasetReferences(domainId: $domainId) { pendingFiles failedFiles references { domainId datasetId revision active indexingPending indexingError facetTableName } }
+}
+"""
+
+CONNECTION_DATASET_STATE = """
+query ConnectionDataset($datasetId: ID!) {
+  connectionDataset(datasetId: $datasetId) { totalFiles matchingFiles extractedFiles dataset { id name crawlJobStatus } }
+}
+"""
+
+
+# ---------------------------------------------------------------------------
+# Domain skills (verified against the live proddemo schema 2026-10-27).
+# A skill is a markdown document with `name:` / `description:` frontmatter; the agent sees
+# name + description, picks one, then loads the body. `createDomainSkill(input:
+# CreateDomainSkillInput{domainId, skillMarkdown, availability: [CHAT|COPILOT|AGENTS], draftId})`
+# returns `Skill`; updates need the current `version`. The context extractor's SKILL agent
+# proposes skills as `UPSERT_SKILL` modeling suggestions.
+DOMAIN_SKILLS = """
+query DomainSkills($domainId: ID!, $includeMarkdown: Boolean) {
+  domainSkills(domainId: $domainId, includeMarkdown: $includeMarkdown) {
+    id version name description isActive isSystemGenerated availability skillMarkdown danglingSchemaRefs updatedAt
+  }
+}
+"""
+
+CREATE_DOMAIN_SKILL = """
+mutation CreateDomainSkill($input: CreateDomainSkillInput!) {
+  createDomainSkill(input: $input) {
+    id version name description isActive availability
+  }
+}
+"""
+
+UPDATE_DOMAIN_SKILL = """
+mutation UpdateDomainSkill($input: UpdateDomainSkillInput!) {
+  updateDomainSkill(input: $input) {
+    id version name description isActive availability
+  }
+}
+"""
+
+SET_DOMAIN_SKILL_ACTIVE = """
+mutation SetDomainSkillActive($id: ID!, $domainId: ID!, $isActive: Boolean!) {
+  setDomainSkillActive(id: $id, domainId: $domainId, isActive: $isActive) {
+    id version name isActive
   }
 }
 """

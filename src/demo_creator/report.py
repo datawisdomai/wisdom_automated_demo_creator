@@ -8,8 +8,9 @@ from .manifest import State
 from .spec import DemoSpec
 
 STEP_ORDER = ["generate", "validate", "ddl", "load", "validate_snowflake", "rq_check_snowflake", "metrics_check", "docs",
-              "publish.connection", "publish.domain", "publish.database", "publish.instructions", "publish.knowledge",
-              "publish.metrics", "publish.reviewed_queries", "publish.lookup", "publish.documents", "eval", "health", "app", "chat", "agent"]
+              "publish.connection", "publish.domain", "publish.database", "publish.federated", "publish.instructions", "publish.knowledge",
+              "publish.metrics", "publish.reviewed_queries", "publish.lookup", "publish.documents", "publish.extraction", "publish.skills", "publish.s3_dataset",
+              "eval", "health", "app", "chat", "agent"]
 
 
 def base_url(spec: DemoSpec) -> str:
@@ -33,18 +34,42 @@ def links(spec: DemoSpec, state: State) -> dict[str, str]:
     if w.get("domain_id"):
         out["Domain"] = f"{url}/domains/{w['domain_id']}"
         out["Domain Health"] = f"{url}/domains/{w['domain_id']}/domain-health"
-    if w.get("app_id"):
-        out["Live App"] = f"{url}/apps/{_slugify(w.get('app_name') or spec.live_app.get('name', 'app'))}--{w['app_id']}"
+    apps = dict(w.get("apps") or {})
+    if w.get("app_id") and not any(a.get("app_id") == w["app_id"] for a in apps.values()):
+        apps = {"_legacy": {"app_id": w["app_id"], "app_name": w.get("app_name") or spec.live_app.get("name", "app"), "conversation_id": w.get("app_conversation_id")}, **apps}
+    for i, (key, a) in enumerate(apps.items()):
+        if not a.get("app_id"):
+            continue
+        label = "Live App" if i == 0 else f"Live App ({a.get('app_name') or key})"
+        out[label] = f"{url}/apps/{_slugify(a.get('app_name') or key)}--{a['app_id']}"
+    chats = dict(w.get("chats") or {})
     conv = w.get("followup_conversation_id") or (state.step("chat") or {}).get("conversation_id")
-    if conv:
-        out["Follow-up chat"] = f"{url}/chat/{conv}"
-    if w.get("app_conversation_id"):
-        out["Live App build conversation"] = f"{url}/chat/{w['app_conversation_id']}"
-    if w.get("agent_id"):
-        out["Agent"] = f"{url}/agents/{w['agent_id']}/edit"
+    if conv and not any(c.get("conversation_id") == conv for c in chats.values()):
+        chats = {"followup": {"conversation_id": conv}, **chats}
+    for i, (key, c) in enumerate(chats.items()):
+        if c.get("conversation_id"):
+            out["Follow-up chat" if i == 0 else f"Chat ({key})"] = f"{url}/chat/{c['conversation_id']}"
+    for i, (key, a) in enumerate(apps.items()):
+        if a.get("conversation_id"):
+            out["Live App build conversation" if i == 0 else f"Live App build conversation ({a.get('app_name') or key})"] = f"{url}/chat/{a['conversation_id']}"
+    agents = dict(w.get("agents") or {})
+    if w.get("agent_id") and not any(a.get("agent_id") == w["agent_id"] for a in agents.values()):
+        agents = {"_legacy": {"agent_id": w["agent_id"], "agent_name": w.get("agent_name")}, **agents}
+    for i, (key, a) in enumerate(agents.items()):
+        if a.get("agent_id"):
+            out["Agent" if i == 0 else f"Agent ({a.get('agent_name') or key})"] = f"{url}/agents/{a['agent_id']}/edit"
     if w.get("connection_id"):
         out["Connection"] = f"{url}/connections/{w['connection_id']}"
+    if w.get("s3_connection_id"):
+        out["S3 document archive connection"] = f"{url}/connections/{w['s3_connection_id']}"
+    for name, info in (w.get("federated_sources") or {}).items():
+        if info.get("connection_id"):
+            out[f"Federated connection ({name}, read-only)"] = f"{url}/connections/{info['connection_id']}"
     return out
+
+
+def _skills_line(w: dict) -> str:
+    return ", ".join(f"{n} v{i.get('version')} ({i.get('via')})" for n, i in (w.get("skills") or {}).items())
 
 
 def render(spec: DemoSpec, state: State) -> str:
@@ -55,14 +80,21 @@ def render(spec: DemoSpec, state: State) -> str:
     lines += ["## Where everything is", "",
               f"| Asset | Value |", "|---|---|",
               f"| Snowflake | `{spec.qualified_schema}` ({len(spec.tables)} tables, {len(spec.snowflake.views)} views) |",
+              *[f"| Federated source (read-only) | {f.connection} — `{f.database}` ({len(f.tables)} tables, {f.dialect}) |" for f in spec.wisdom.federated_sources],
               f"| Wisdom deployment / workspace | {spec.wisdom.deployment} / {spec.wisdom.workspace_id} |",
-              f"| Domain | {spec.wisdom.domain_name} — `{w.get('domain_id', '—')}` |",
+              (f"| Domain | {spec.wisdom.domain_name} — `{w.get('domain_id', '—')}` (EXISTING, shared — this demo added `{spec.qualified_schema}`) |"
+               if spec.wisdom.existing_domain else f"| Domain | {spec.wisdom.domain_name} — `{w.get('domain_id', '—')}` |"),
               f"| Live App | {w.get('app_name', spec.live_app.get('name', '—'))} — `{w.get('app_id', 'not created')}` |",
+              *[f"| Live App ({a.get('app_name') or k}) | `{a.get('app_id')}` |" for k, a in (w.get("apps") or {}).items() if a.get("app_id") and a.get("app_id") != w.get("app_id")],
               f"| Follow-up chat | `{w.get('followup_conversation_id', 'not asked')}` |",
+              *[f"| Chat ({k}) | `{c.get('conversation_id')}` · score {c.get('score')} |" for k, c in (w.get("chats") or {}).items() if c.get("conversation_id") and c.get("conversation_id") != w.get("followup_conversation_id")],
               f"| Agent (disabled) | {w.get('agent_name', spec.agent.get('name', '—'))} — `{w.get('agent_id', 'not created')}` |",
+              *[f"| Agent ({a.get('agent_name') or k}) | `{a.get('agent_id')}` |" for k, a in (w.get("agents") or {}).items() if a.get("agent_id") and a.get("agent_id") != w.get("agent_id")],
+              *([f"| Skills | {_skills_line(w)} |"] if w.get("skills") else []),
               f"| Eval | set `{w.get('eval_set_id', '—')}` · last score {w.get('last_score', '—')} |",
               f"| Domain Health run | job `{w.get('health_job_run_id', 'not triggered')}` (review in the Domain Health tab) |",
-              f"| Documents | {len(w.get('uploaded_documents') or [])} uploaded |",
+              f"| Documents | {len(w.get('uploaded_documents') or [])} uploaded"
+              + (f"; S3 dataset `{w['s3_dataset_id']}` on connection `{w.get('s3_connection_id')}`" if w.get('s3_dataset_id') else "") + " |",
               f"| Instance | {url} |", ""]
     lines += ["## Links", ""]
     for label, href in links(spec, state).items():
@@ -93,6 +125,7 @@ def render(spec: DemoSpec, state: State) -> str:
     for cp in spec.control_points:
         lines.append(f"- **{cp.id}** {cp.name}" + (f" (hero: {cp.hero})" if cp.hero else ""))
     lines.append("")
-    if spec.chat.get("followup_question"):
-        lines += ["## Follow-up question", "", f"> {spec.chat['followup_question']}", ""]
+    qs = [c.get("followup_question") for c in spec.chats if c.get("followup_question")]
+    if qs:
+        lines += ["## Follow-up question" + ("s" if len(qs) > 1 else ""), ""] + [f"> {q}" + "\n" for q in qs]
     return "\n".join(lines)

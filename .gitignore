@@ -9,3 +9,4 @@ demos/*/build/
 demos/*/inputs/*.transcript
 *.duckdb
 demos/*/.state.lock
+demos/*/inputs/ref/

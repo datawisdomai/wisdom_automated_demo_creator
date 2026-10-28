@@ -18,7 +18,7 @@ class Check:
     fix: str = ""
 
 
-def run_checks(deployment: str = "proddemo", *, network: bool = True) -> list[Check]:
+def run_checks(deployment: str = "proddemo", *, network: bool = True, spec=None) -> list[Check]:
     checks: list[Check] = []
 
     env_present = config.load_env()
@@ -72,6 +72,8 @@ def run_checks(deployment: str = "proddemo", *, network: bool = True) -> list[Ch
             checks.append(Check("Wisdom API key authenticates", True, f"as {me.get('email', '?')}"))
             ws = {w["id"]: w["name"] for w in client.workspaces()}
             in_ws = dep.workspace_id in ws
+            if spec is not None and spec.wisdom.existing_domain:
+                checks.append(_existing_domain_check(client, spec))
             checks.append(Check(
                 f"workspace '{dep.workspace_name}' visible", in_ws,
                 f"visible workspaces: {', '.join(sorted(ws.values()))}",
@@ -94,6 +96,23 @@ def run_checks(deployment: str = "proddemo", *, network: bool = True) -> list[Ch
             checks.append(Check("Wisdom API key authenticates", False, _short(exc), "check the key value in .env"))
 
     return checks
+
+
+def _existing_domain_check(client, spec) -> Check:
+    """An existing_domain demo: the id must resolve in the target workspace and carry the expected name."""
+    want, name, ws_id = spec.wisdom.domain_id, spec.wisdom.domain_name, spec.wisdom.workspace_id
+    try:
+        live = next((d for d in client.list_domains(workspace_id=ws_id, limit=500) if d.get("id") == want), None)
+        if live is None:
+            return Check("EXISTING domain resolves", False, f"{want} not found in workspace {ws_id}", "check wisdom.domain_id / workspace_id in demo.yaml")
+        if str(live.get("name", "")).strip().lower() != str(name).strip().lower():
+            return Check("EXISTING domain resolves", False, f"{want} is named '{live.get('name')}', demo.yaml says '{name}'",
+                         "fix wisdom.domain_name so the id and name agree")
+        dbs = {t["database"] for t in client.domain_table_columns(want)}
+        return Check("EXISTING domain resolves", True,
+                     f"'{live.get('name')}' ({want}) has {len(dbs)} databases; additive mode will ADD {spec.snowflake.database}, nothing pre-existing is modified")
+    except Exception as exc:  # noqa: BLE001
+        return Check("EXISTING domain resolves", False, _short(exc), "the key must be able to read the domain")
 
 
 def _short(exc: Exception) -> str:

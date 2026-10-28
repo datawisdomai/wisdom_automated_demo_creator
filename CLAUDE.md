@@ -43,6 +43,19 @@ dropping a database, touching another workspace) is announced and confirmed firs
   via `evaluationRuns(evalSetIds)` sharing `runGroupId`); never
   `createEvalsetFromReviewedQueries(runEval=True)`.
 - Knowledge de-dups by description; metrics do not — track names in `.state.json`.
+- **Federated sources** (`wisdom.federated_sources[]`, see `docs/demo_spec_reference.md`): tables from another
+  existing connection (e.g. a partner's read-only Teradata) are attached to the domain by the publish step
+  `federated`; that connection is never created/updated/refreshed. Reviewed queries for it use
+  `rq.add(..., source="<connection>")`: local checks skip them, `rq-check --domain` runs them via `runSqlQuery` in
+  the source dialect, they stay out of the eval set and the extractor's query library, and publish binds them
+  directly to that connection (the one exception to extractor-only context, because the extractor cannot bind a
+  reviewed query to a second connection). `runSqlQuery` runs on ONE connection; cross-connection joins happen only
+  in chat/Live App (Python step), so the federation beat is a chat question, not a view.
+- **Skills** (`wisdom.skills[]`, markdown with `name:`/`description:` frontmatter, see `docs/demo_spec_reference.md`): the way to make
+  a recurring analysis return the same shape every time (a report grid, a fixed drill order, a governed draft). They enter through the
+  extractor's `SKILL` agent from a `runbook` context asset (`UPSERT_SKILL` suggestions, accepted as the `skills` family); publish step
+  `skills` creates any listed skill the extractor did not produce and reads all of them back (`domainSkills`). `/<name>` in chat forces one.
+  A demo can carry several Live Apps / chats / agents (`live_apps[]`, `chats[]`, `agents[]`).
 - **Context enters the domain only through the context extractor** (`wisdom.context_mode: extractor`, the
   default). The local `metrics.csv` / `reviewed_queries.py` / `knowledge.csv` stay the source of truth for
   `rq-check`, `metrics-check` and the eval set, but the domain receives them *disguised* as real assets —
@@ -51,7 +64,9 @@ dropping a database, touching another workspace) is announced and confirmed firs
   knowledge / synonym / metric / reviewed-query suggestions, leaves description rewrites pending for the
   steward-review demo beat, reads back coverage and retries once; it never falls back to CSV uploads.
   Extractor file facts: upload connection id is `files` (attach it first); FileInput needs the GCS/S3
-  source from the signed URL; `.yml .yaml .sql .txt .csv .pdf` register, `.md` does not.
+  source from the signed URL; `.yml .yaml .sql .txt .csv .pdf` register, `.md` does not. **Keep extractor files small
+  and runs short**: `wisdom.extraction.batch_size: 3` (runs are triggered concurrently, resumed per file); tag duplicative
+  reviewed queries `eval_only` so the certified query library stays well under 100 KB (a 308 KB library stalled a run).
 - `DEMO_REPORT.md` and `DEMO_SCRIPT.md` always carry **clickable links** (Live App `/apps/<slug>--<app_id>`,
   chat `/chat/<conversation>`, agent `/agents/<id>/edit`, domain `/domains/<id>`, Domain Health tab,
   connection `/connections/<id>`) via `report.links()`; the finish message pastes them. Ids alone are not enough.
@@ -69,6 +84,6 @@ dropping a database, touching another workspace) is announced and confirmed firs
 `doctor` · `new` · `generate` · `schema-diff` · `validate [--snowflake]` · `rq-check [--snowflake]` ·
 `metrics-check` · `ddl [--apply] [--start-at N] [--grants]` · `load [--apply] [--tables ...]` · `docs` ·
 `publish [--apply] [--only ...]` · `eval [--report-last]` · `health [--apply]` · `app [--apply]` · `chat [--apply] [--question ...]` ·
-`agent [--apply]` · `report` · `health [--apply]` (always last, left running) · `all [--apply] [--redo]` · `status`.
+`agent [--apply]` · `report` · `s3 [--apply]` (stretch: generated contract PDFs → bucket; then `publish --only s3_dataset`) · `health [--apply]` (always last, left running) · `all [--apply] [--redo]` · `status`.
 Skills: `/setup`, `/create-demo` (front door), `/run-step` (heal one step), `/demo-script`.
 Reference demo: `demos/halcyon/` (migrated from `wisdom demos/halcyon_poc`; same seed, same rows).

@@ -39,6 +39,14 @@ Write `demos/<slug>/DEMO_PLAN.md` from `docs/templates/DEMO_PLAN_template.md` an
 - Follow-up question = a genuinely multi-step question about the hero arc, with 3–5 expected points.
 - Agent = watches the hero metric on a schedule; created disabled.
 - Documents (PDFs) only when the story needs unstructured evidence (a contract, a bulletin, a report).
+- When the story needs the same answer every time (a report a BI user must recognise, a fixed investigation order, a
+  governed draft), write it as a **skill** (`wisdom.skills[]`, `skills/<name>.md`) and author a `runbook` context asset
+  that carries the same procedures so the extractor proposes them; evals then include the `/<name>` prompts.
+- A **federated source** (`wisdom.federated_sources[]`: read-only tables from a connection somebody else owns,
+  e.g. a partner's Teradata) only when the story needs it; the join to our data happens in chat (the follow-up
+  question), never in a view; profile the foreign tables first through `Client.run_sql(<a domain that already
+  has them>, ..., dialect=<theirs>, database_name=<theirs>)` and cache any keys the generator must reuse under
+  `inputs/ref/` (pattern: `demos/pecos_openinvoice/ref_extract.py`).
 Present the plan in plain language (≤ 15 lines) and wait. Iterate until they say go. **Nothing
 touches Snowflake or Wisdom before approval.** After approval, do not ask further questions unless a
 repair loop is exhausted.

@@ -60,15 +60,16 @@ def ensure_eval_set(client: Client, spec: DemoSpec, state: State, registry: Regi
     existing_id = state.wisdom.get("eval_set_id")
     if existing_id:
         try:
-            client.update_eval_set(existing_id, items, name=name)
+            client.update_eval_set(existing_id, items, name=name, domain_id=domain_id)
             return existing_id
         except Exception:  # noqa: BLE001 — fall through to create a fresh one
             pass
-    for es in client.list_eval_sets(domain_id):
-        if str(es.get("name", "")).strip().lower() == name.lower():
-            client.update_eval_set(es["id"], items, name=name)
-            state.set("wisdom", "eval_set_id", es["id"])
-            return es["id"]
+    if not spec.wisdom.existing_domain:   # on a shared domain a same-named set is somebody else's: never adopt it
+        for es in client.list_eval_sets(domain_id):
+            if str(es.get("name", "")).strip().lower() == name.lower():
+                client.update_eval_set(es["id"], items, name=name, domain_id=domain_id)
+                state.set("wisdom", "eval_set_id", es["id"])
+                return es["id"]
     created = client.create_eval_set(name, domain_id, items)
     eval_set_id = created["id"] if isinstance(created, dict) else str(created)
     state.set("wisdom", "eval_set_id", eval_set_id)
@@ -123,7 +124,7 @@ def report_last(client: Client, spec: DemoSpec, state: State, registry: Registry
         raise RuntimeError("no completed evaluation run yet — run `demo eval` without --report-last")
     group_id = runs[0].get("runGroupId")
     group_runs = [r for r in runs if group_id and r.get("runGroupId") == group_id] or runs[:1]
-    return _report_from_group(client, spec, state, eval_set_id, group_runs, prompts=[q.nl for q in registry])
+    return _report_from_group(client, spec, state, eval_set_id, group_runs, prompts=[q.nl for q in registry.local()])
 
 
 def run_and_wait(client: Client, spec: DemoSpec, state: State, eval_set_id: str, registry: Registry, *, timeout_s: int = 1200) -> EvalReport:
@@ -132,7 +133,7 @@ def run_and_wait(client: Client, spec: DemoSpec, state: State, eval_set_id: str,
     domain_id = state.wisdom["domain_id"]
     mode = spec.wisdom.eval.get("experimental_mode", "EXPERIMENTAL_MODE_NONE")
     n_runs = run_count_for(spec)
-    prompts = [q.nl for q in registry]
+    prompts = [q.nl for q in registry.local()]   # the eval set carries only the warehouse queries (to_eval_items); keep labels aligned
     import time as _time
 
     existing = _list_runs(client, eval_set_id, domain_id)

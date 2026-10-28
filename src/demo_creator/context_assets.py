@@ -24,10 +24,10 @@ from .context_files import Metric, bootstrap_sections, bootstrap_to_knowledge, r
 from .spec import DemoSpec
 
 # agent types the extractor runs for the generated + authored assets
-ALL_AGENTS = ["CONTEXT", "DESCRIPTIONS", "SYNONYMS", "METRICS", "REVIEWED_QUERIES"]
+ALL_AGENTS = ["CONTEXT", "DESCRIPTIONS", "SYNONYMS", "METRICS", "REVIEWED_QUERIES", "SKILL"]
 
 # which suggestion families the pipeline accepts automatically after an extraction run
-ACCEPT_DEFAULT = ["knowledge", "synonyms", "metrics", "reviewed_queries"]   # descriptions stay pending (steward review beat)
+ACCEPT_DEFAULT = ["knowledge", "synonyms", "metrics", "reviewed_queries", "skills"]   # descriptions stay pending (steward review beat)
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,11 @@ class ExtractionFile:
     kind: str           # semantic_model | query_library | handbook | <authored kind>
     instructions: str   # file-level guidance for the extractor
     generated: bool
+    source: Path | None = None   # the authored markdown/text the file was rendered from (its digest decides re-uploads)
+
+    @property
+    def digest_path(self) -> Path:
+        return self.source if self.source is not None else self.path
 
 
 # ---------------------------------------------------------------- helpers
@@ -130,6 +135,15 @@ def render_semantic_model(spec: DemoSpec, metrics: list[Metric]) -> str:
     return "\n".join(lines)
 
 
+def library_queries(registry):
+    """Reviewed queries that go into the certified query library: everything not tagged
+    `eval_only` (those stay in the eval set and rq-check but are left out to keep the
+    extractor's file small) and nothing with a `source` (federated SQL runs on another
+    connection; the publish step binds it directly)."""
+    return [q for q in (registry or [])
+            if "eval_only" not in (getattr(q, "tags", ()) or ()) and not getattr(q, "source", None)]
+
+
 def render_query_library(spec: DemoSpec, registry) -> str:
     """A certified query library as analysts keep it in the analytics repo: one block per
     question with the approved SQL. The REVIEWED_QUERIES agent turns each block into a
@@ -143,7 +157,7 @@ def render_query_library(spec: DemoSpec, registry) -> str:
         "-- Keep the question text and the SQL together; both are reviewed and must not be edited independently.",
         "",
     ]
-    for i, q in enumerate(registry, 1):
+    for i, q in enumerate(library_queries(registry), 1):
         sql = q.sql.strip().rstrip(";")
         tags = ", ".join(getattr(q, "tags", ()) or ()) or "certified"
         lines += [
@@ -221,19 +235,42 @@ def render_generated_assets(spec: DemoSpec, registry) -> list[ExtractionFile]:
     return files
 
 
+# context_assets[] kinds that are uploaded as the text file itself (the extractor registers .sql/.txt),
+# with the extension the extractor expects; everything else is rendered to PDF by `demo docs`.
+TEXT_KINDS = {"query_log": ".sql", "report_definition": ".txt", "sql": ".sql", "text": ".txt"}
+
+
+def asset_output_path(spec: DemoSpec, asset: dict) -> Path:
+    """Where `demo docs` puts this asset for the extractor: build/docs/<stem>.pdf, or
+    build/docs/<stem><ext> for the text kinds."""
+    stem = Path(asset["spec"]).stem
+    ext = TEXT_KINDS.get(str(asset.get("kind") or ""), ".pdf")
+    return spec.paths.docs_out / (stem + ext)
+
+
 def authored_assets(spec: DemoSpec) -> list[ExtractionFile]:
-    """The `context_assets[]` PDFs rendered by `demo docs`."""
+    """The `context_assets[]` files produced by `demo docs` (PDFs, or the text file for the text kinds)."""
     files = []
     for a in list(spec.raw.get("context_assets") or []):
-        pdf = spec.paths.docs_out / (Path(a["spec"]).stem + ".pdf")
+        pdf = asset_output_path(spec, a)
         kind = a.get("kind", "document")
         instr = a.get("instructions") or {
             "standard": "A metric definitions standard: capture every definition, measurement rule, owner and physical mapping as knowledge; create synonyms for the alternate names it lists.",
             "glossary": "A business glossary and ownership register: capture each term's definition, owner, steward, source system and physical asset as knowledge, and the synonym lists as synonyms; use the physical asset mappings to describe tables and columns.",
             "wiki": "A data platform wiki page: capture the join paths, gotchas, refresh cadence and lineage as knowledge and improve table and column descriptions from it.",
             "chat_export": "A chat channel export in which data stewards answer analysts' questions: capture each answered question as knowledge in the steward's words.",
+            "query_log": ("A query-log export from the production data warehouse (one logged SQL statement per block with its user, timestamp and CPU time). "
+                          "Many statements are noise (statistics collection, session checks, ETL audit, unrelated schemas): ignore those. For every business "
+                          "statement that reads the analytics views, create a reviewed query whose question is what a business user would have asked in plain "
+                          "language and whose SQL is the statement rewritten for this warehouse's dialect against the same views; capture recurring filters, "
+                          "groupings and formulas as knowledge and the column aliases as synonyms."),
+            "report_definition": ("A BI report definition export (attributes, metrics with formulas, filters, drill paths). Capture every metric formula and "
+                                  "business rule as knowledge, each attribute's alternate names as synonyms, and the report's main grid as a reviewed query."),
+            "runbook": ("A team runbook of repeatable analysis procedures. Turn each procedure into a skill: a lowercase hyphenated name, a one-sentence "
+                        "description of when to use it, and the procedure's steps, data rules and presentation rules as the instructions, kept verbatim. "
+                        "Capture the definitions it states as knowledge."),
         }.get(kind, "A business document: capture the facts, dates, names and numbers it states as knowledge.")
-        files.append(ExtractionFile(pdf, kind, instr, False))
+        files.append(ExtractionFile(pdf, kind, instr, False, source=spec.dir / a["spec"]))
     return files
 
 
@@ -266,11 +303,19 @@ def coverage(client, domain_id: str, spec: DemoSpec, registry) -> dict:
     f, miss = _match([m.name for m in metrics], have_m, threshold=0.95)
     out["metrics"] = {"expected": len(metrics), "found": len(f), "missing": miss, "in_domain": len(have_m)}
     have_q = [str(r.get("question", "")) for r in client.list_reviewed_queries(domain_id, limit=500)]
-    wanted_q = [q.nl for q in registry] if registry is not None else []
+    wanted_q = [q.nl for q in library_queries(registry)] if registry is not None else []
     f, miss = _match(wanted_q, have_q, threshold=0.85)
     out["reviewed_queries"] = {"expected": len(wanted_q), "found": len(f), "missing": miss, "in_domain": len(have_q)}
     facts = read_knowledge_csv(spec.knowledge_path) if spec.knowledge_path.is_file() else []
     out["knowledge"] = {"story_facts": len(facts), "in_domain": len(client.get_domain_knowledge(domain_id))}
+    wanted_s = [sk.name for sk in spec.wisdom.skills]
+    if wanted_s:
+        try:
+            have_s = [str(x.get("name", "")) for x in client.list_domain_skills(domain_id, include_markdown=False)]
+        except Exception:  # noqa: BLE001 — an older deployment without skills
+            have_s = []
+        f, miss = _match(wanted_s, have_s, threshold=0.95)
+        out["skills"] = {"expected": len(wanted_s), "found": len(f), "missing": miss, "in_domain": len(have_s)}
 
     def pct(d):
         return round(d["found"] / d["expected"], 3) if d["expected"] else 1.0
@@ -279,9 +324,15 @@ def coverage(client, domain_id: str, spec: DemoSpec, registry) -> dict:
     return out
 
 
-def accept_suggestions(client, domain_id: str, families: list[str]) -> dict:
+def accept_suggestions(client, domain_id: str, families: list[str], *, job_run_ids: list[str] | None = None,
+                       exclude_ids: set[str] | None = None) -> dict:
     """Accept pending modeling suggestions of the requested families; leave the rest
-    (table / column description rewrites by default) pending for steward review."""
+    (table / column description rewrites by default) pending for steward review.
+
+    `job_run_ids` scopes the candidates to the suggestions produced by those extraction runs
+    (falls back to the whole domain when the filter yields nothing); `exclude_ids` are never
+    accepted whatever the filter does — on a shared domain they are the suggestions that were
+    pending before this demo uploaded anything."""
     def family(s: dict) -> str | None:
         t = s.get("task") or {}
         typ = str(t.get("type") or "")
@@ -293,18 +344,33 @@ def accept_suggestions(client, domain_id: str, families: list[str]) -> dict:
             return "knowledge"
         if "SYNONYM" in typ:
             return "synonyms"
+        if t.get("upsertSkill") or "SKILL" in typ:
+            return "skills"
         if "DESCRIPTION" in typ or t.get("addColumnDescription") or t.get("enterTableDescription"):
             return "descriptions"
         return None
 
-    pending = [s for s in client.modeling_suggestions(domain_id, include_all_statuses=True) if "PENDING" in str(s.get("status", ""))]
+    nodes: dict[str, dict] = {}
+    scoped = False
+    for rid in job_run_ids or []:
+        for s in client.modeling_suggestions(domain_id, include_all_statuses=True, job_run_id=rid):
+            nodes[s["id"]] = s
+    if nodes:
+        scoped = True
+    else:
+        nodes = {s["id"]: s for s in client.modeling_suggestions(domain_id, include_all_statuses=True)}
+    exclude = set(exclude_ids or ())
+    pending = [s for s in nodes.values() if "PENDING" in str(s.get("status", "")) and s["id"] not in exclude]
     todo = [s["id"] for s in pending if family(s) in families]
     accepted = failed = 0
+    accepted_ids: list[str] = []
     errors: list[str] = []
     for i in range(0, len(todo), 20):
-        for r in client.apply_modeling_suggestions(domain_id, todo[i:i + 20]):
+        chunk = todo[i:i + 20]
+        for j, r in enumerate(client.apply_modeling_suggestions(domain_id, chunk)):
             if r.get("success"):
                 accepted += 1
+                accepted_ids.append(str(r.get("id") or (chunk[j] if j < len(chunk) else "")))
             else:
                 failed += 1
                 if len(errors) < 5:
@@ -313,4 +379,5 @@ def accept_suggestions(client, domain_id: str, families: list[str]) -> dict:
     by_family: dict[str, int] = {}
     for s in pending:
         by_family[family(s) or "other"] = by_family.get(family(s) or "other", 0) + 1
-    return {"pending_before": len(pending), "by_family": by_family, "accepted": accepted, "failed": failed, "left_pending": left, "errors": errors}
+    return {"pending_before": len(pending), "by_family": by_family, "accepted": accepted, "failed": failed, "left_pending": left, "errors": errors,
+            "accepted_ids": [a for a in accepted_ids if a], "scoped": scoped, "excluded": len(exclude)}

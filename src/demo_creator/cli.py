@@ -188,7 +188,7 @@ def cmd_validate(args) -> int:
 
 # ---------------------------------------------------------------- rq-check
 def cmd_rq_check(args) -> int:
-    from .reviewed_queries import check_queries, load_registry, write_import_csv
+    from .reviewed_queries import Registry, check_queries, load_registry, write_import_csv
     from .validate import build_duckdb, duckdb_query, snowflake_query
 
     spec = _spec(args)
@@ -199,7 +199,7 @@ def cmd_rq_check(args) -> int:
         print(f"Checking {len(registry)} reviewed queries against DuckDB...")
     con = build_duckdb(spec)
     try:
-        results = check_queries(registry, duckdb_query(con), echo=not args.json)
+        results = check_queries(registry, duckdb_query(con), echo=not args.json, skip_tags=("cross_db", "federated"))
     finally:
         con.close()
         if not args.keep_duckdb and spec.paths.duckdb.exists():
@@ -215,11 +215,49 @@ def cmd_rq_check(args) -> int:
         sf = config.snowflake_config()
         conn = connect(sf, database=spec.snowflake.database, schema=spec.snowflake.schema)
         try:
-            sf_results = check_queries(registry, snowflake_query(conn), echo=not args.json)
+            sf_results = check_queries(registry, snowflake_query(conn), echo=not args.json, skip_tags=("cross_db", "federated"))
         finally:
             conn.close()
         payload["snowflake"] = [r.__dict__ for r in sf_results if not r.ok]
         ok = ok and all(r.ok for r in sf_results)
+
+    # Queries that only run in the target domain: cross_db (joins to databases that exist only there) run
+    # on the demo's warehouse connection; federated (source=<connection>) run on THAT connection in its
+    # own dialect and database. Both go through Wisdom's SQL runner (read-only), the engine the demo answers with.
+    cross = Registry()
+    for rq in registry:
+        if "cross_db" in rq.tags and not rq.federated:
+            cross.add(rq.nl, rq.sql, tags=rq.tags)
+    fed_sources = {f.connection: f for f in spec.wisdom.federated_sources}
+    fed_groups = [(name, registry.for_source(name)) for name in fed_sources if len(registry.for_source(name))]
+    remote = len(cross) + sum(len(g) for _, g in fed_groups)
+    if remote and args.domain:
+        domain_id = state.wisdom.get("domain_id") or spec.wisdom.domain_id
+        if not domain_id:
+            _die(args, "--domain needs wisdom.domain_id in demo.yaml or a published domain in .state.json", code=2)
+        client = config.wisdom_client(spec.wisdom.deployment)
+        payload["domain"] = []
+        if len(cross):
+            if not args.json:
+                print(f"\nChecking {len(cross)} cross_db queries through the Wisdom SQL runner on domain {domain_id}...")
+
+            def wisdom_query(sql: str):
+                return client.run_sql(domain_id, sql, dialect=spec.wisdom.dialect, database_name=spec.snowflake.database)["rows"]
+            dom_results = check_queries(cross, wisdom_query, echo=not args.json)
+            payload["domain"] += [r.__dict__ for r in dom_results if not r.ok]
+            ok = ok and all(r.ok for r in dom_results)
+        for name, group in fed_groups:
+            src = fed_sources[name]
+            if not args.json:
+                print(f"\nChecking {len(group)} federated queries on '{name}' ({src.dialect}, {src.database}) through the Wisdom SQL runner...")
+
+            def fed_query(sql: str, _src=src):
+                return client.run_sql(domain_id, sql, dialect=_src.dialect, database_name=_src.database)["rows"]
+            fed_results = check_queries(group, fed_query, echo=not args.json)
+            payload["domain"] += [r.__dict__ for r in fed_results if not r.ok]
+            ok = ok and all(r.ok for r in fed_results)
+    elif remote and not args.json:
+        print(f"\n{remote} cross_db/federated queries skipped locally — run `demo rq-check {spec.name} --domain` to check them in the target domain")
 
     if ok:
         out = write_import_csv(registry, spec, spec.paths.ensure().reviewed_csv,
@@ -342,9 +380,16 @@ def cmd_docs(args) -> int:
         state.mark("docs", "ok", rendered=0)
         return 0
     results = render_all(spec, echo=not args.json)
-    ok = all(r["ok"] for r in results)
+    gen = spec.raw.get("generated_documents") or {}
+    generated = []
+    if gen.get("module"):
+        # demo-specific renderer (e.g. contract PDFs built from the generated frames): render(spec, out_dir) -> [{file, ok}]
+        from .validate import load_demo_module
+        mod = load_demo_module(spec.dir / gen["module"], f"{spec.name}_generated_documents")
+        generated = mod.render(spec, spec.dir / str(gen.get("out") or "build/contracts"), echo=not args.json)
+    ok = all(r["ok"] for r in results) and all(r.get("ok", True) for r in generated)
     state.mark("docs", "ok" if ok else "failed", rendered=[r.get("pdf") for r in results if r["ok"]],
-               failures=[r for r in results if not r["ok"]])
+               generated=len(generated), failures=[r for r in results if not r["ok"]])
     _emit(args, {"ok": ok, "rendered": results}, f"{'rendered' if ok else 'FAILED'} {sum(r['ok'] for r in results)}/{len(results)} document(s) -> {spec.paths.docs_out}")
     return 0 if ok else 1
 
@@ -364,7 +409,12 @@ def cmd_publish(args) -> int:
     except PublishError as exc:
         _die(args, str(exc), code=2)
     if not args.json:
-        print(f"{'APPLY' if args.apply else 'DRY RUN'} — publishing '{spec.wisdom.domain_name}' to {spec.wisdom.deployment} / {pub.workspace_label}")
+        if spec.wisdom.existing_domain:
+            print(f"{'APPLY' if args.apply else 'DRY RUN'} — EXTENDING EXISTING domain '{spec.wisdom.domain_name}' ({spec.wisdom.domain_id}) on "
+                  f"{spec.wisdom.deployment} / {pub.workspace_label}: adds {spec.qualified_schema} through connection "
+                  f"'{spec.wisdom.connection_name}'; nothing pre-existing is deleted, renamed, overwritten or auto-accepted")
+        else:
+            print(f"{'APPLY' if args.apply else 'DRY RUN'} — publishing '{spec.wisdom.domain_name}' to {spec.wisdom.deployment} / {pub.workspace_label}")
     reports = pub.run(registry, steps=args.only or None)
     failed = [r for r in reports if r.status == "failed"]
     payload = {"ok": not failed, "apply": args.apply, "domain_id": pub.domain_id, "steps": [r.__dict__ for r in reports]}
@@ -451,31 +501,55 @@ def _need_domain(args, state: State) -> str:
     return did
 
 
+def _select(entries: list[dict], key: str | None, what: str, args) -> list[dict]:
+    """The spec entries to act on: all of them, or the one whose key matches --<what>."""
+    if not key:
+        return entries
+    hit = [e for e in entries if e.get("key") == key]
+    if not hit:
+        _die(args, f"no {what} with key '{key}' in demo.yaml (have {[e.get('key') for e in entries]})", code=2)
+    return hit
+
+
 def cmd_chat(args) -> int:
+    """Ask every chats[] question (or --chat KEY, or an ad-hoc --question) and judge the answers."""
     from .experiences import ask_followup
 
     spec = _spec(args)
     state = State.load(spec.dir)
     _need_domain(args, state)
     client = config.wisdom_client(spec.wisdom.deployment)
-    question = args.question or spec.chat.get("followup_question")
+    entries = _select(spec.chats, args.chat, "chat", args) or [{"key": "followup"}]
+    if args.question:
+        entries = [{**entries[0], "followup_question": args.question, "expected_points": entries[0].get("expected_points") or []}]
     if not args.apply:
-        _emit(args, {"ok": True, "dry_run": True, "question": question},
-              f"DRY RUN — would open a visible conversation on the domain and ask:\n  {question}\nRe-run with --apply.")
+        qs = "\n".join(f"  [{e.get('key')}] {e.get('followup_question') or e.get('question')}" for e in entries)
+        _emit(args, {"ok": True, "dry_run": True, "questions": [e.get("followup_question") for e in entries]},
+              f"DRY RUN — would open {len(entries)} visible conversation(s) on the domain and ask:\n{qs}\nRe-run with --apply.")
         return 0
-    if not args.json:
-        print(f"Asking: {question}\n(waiting for the full answer, up to {args.timeout}s)...")
-    ans = ask_followup(client, spec, state, question=question, timeout_s=args.timeout)
-    ok = ans.completed and len(ans.text) > 40 and (ans.score is None or ans.score >= 0.6)
-    state.mark("chat", "ok" if ok else "failed", conversation_id=ans.conversation_id, score=ans.score, seconds=ans.seconds, completed=ans.completed)
-    text = (f"conversation {ans.conversation_id} — {'complete' if ans.completed else 'TIMED OUT'} in {ans.seconds}s, {len(ans.text)} chars\n"
-            f"expected points hit {len(ans.hits)}/{len(ans.hits) + len(ans.misses)}" + (f"; missed: {ans.misses}" if ans.misses else "") +
-            f"\n--- answer ---\n{ans.text[:3000]}")
-    _emit(args, {"ok": ok, **ans.__dict__, "score": ans.score}, text)
-    return 0 if ok else 1
+    results, all_ok = [], True
+    for e in entries:
+        question = e.get("followup_question") or e.get("question")
+        if not args.json:
+            print(f"Asking [{e.get('key')}]: {question}\n(waiting for the full answer, up to {args.timeout}s)...")
+        ans = ask_followup(client, spec, state, question=question, timeout_s=args.timeout, entry=e)
+        ok = ans.completed and len(ans.text) > 40 and (ans.score is None or ans.score >= 0.6)
+        all_ok = all_ok and ok
+        results.append({"key": e.get("key"), "ok": ok, **ans.__dict__, "score": ans.score})
+        if not args.json:
+            print(f"conversation {ans.conversation_id} — {'complete' if ans.completed else 'TIMED OUT'} in {ans.seconds}s, {len(ans.text)} chars\n"
+                  f"expected points hit {len(ans.hits)}/{len(ans.hits) + len(ans.misses)}" + (f"; missed: {ans.misses}" if ans.misses else "") +
+                  f"\n--- answer ---\n{ans.text[:3000]}\n")
+    if not args.chat and not args.question:
+        first = results[0]
+        state.mark("chat", "ok" if all_ok else "failed", conversation_id=first["conversation_id"], score=first["score"], seconds=first["seconds"],
+                   completed=first["completed"], chats={r["key"]: {"conversation_id": r["conversation_id"], "score": r["score"], "ok": r["ok"]} for r in results})
+    _emit(args, {"ok": all_ok, "results": results}, f"{sum(1 for r in results if r['ok'])}/{len(results)} chat(s) ok")
+    return 0 if all_ok else 1
 
 
 def cmd_agent(args) -> int:
+    """Create every agents[] entry (or --agent KEY) as a DRAFT; existing ones are kept unless --recreate."""
     from .experiences import create_agent
 
     spec = _spec(args)
@@ -484,25 +558,45 @@ def cmd_agent(args) -> int:
     dep = config.wisdom_deployment(spec.wisdom.deployment)
     workspace_id = spec.wisdom.workspace_id or dep.workspace_id
     client = config.wisdom_client(spec.wisdom.deployment)
-    name = spec.agent.get("name")
-    if state.wisdom.get("agent_id") and not args.recreate:
-        back = client.get_agent(state.wisdom["agent_id"], workspace_id=workspace_id)
-        if back:
-            _emit(args, {"ok": True, "agent_id": back["id"], "is_draft": back.get("isDraft"), "existing": True},
-                  f"agent '{name}' already exists ({back['id']}, draft={back.get('isDraft')}); use --recreate to rebuild")
-            return 0
-    if not args.apply:
-        _emit(args, {"ok": True, "dry_run": True, "name": name}, f"DRY RUN — would generate a workflow from agent_prompt.md and create DRAFT agent '{name}' (never scheduled). Re-run with --apply.")
+    entries = _select(spec.agents, args.agent, "agent", args)
+    if not entries:
+        _emit(args, {"ok": True, "skipped": True}, "no agents[] / agent in demo.yaml")
         return 0
-    me = (client.current_user() or {}).get("email")
-    res = create_agent(client, spec, state, workspace_id=workspace_id, default_email=me)
-    ok = res.is_draft or not res.schedule_id
-    state.mark("agent", "ok" if ok else "failed", agent_id=res.agent_id, is_draft=res.is_draft, nodes=res.workflow_nodes)
-    _emit(args, {"ok": ok, **res.__dict__}, f"agent '{res.name}' created as {'DRAFT' if res.is_draft else 'ACTIVE?!'} ({res.agent_id}), {res.workflow_nodes} workflow nodes")
-    return 0 if ok else 1
+    results, all_ok, first_key = [], True, entries[0].get("key")
+    for e in entries:
+        name, key = e.get("name"), e.get("key")
+        have = dict((state.wisdom.get("agents") or {}).get(key) or {})
+        if not have.get("agent_id") and key == spec.agents[0].get("key") and state.wisdom.get("agent_id"):
+            have = {"agent_id": state.wisdom["agent_id"]}
+        if have.get("agent_id") and not args.recreate:
+            back = client.get_agent(have["agent_id"], workspace_id=workspace_id)
+            if back:
+                results.append({"key": key, "ok": True, "agent_id": back["id"], "name": name, "is_draft": back.get("isDraft"), "existing": True})
+                if not args.json:
+                    print(f"agent '{name}' already exists ({back['id']}, draft={back.get('isDraft')}); use --recreate to rebuild")
+                continue
+        if not args.apply:
+            results.append({"key": key, "ok": True, "dry_run": True, "name": name})
+            if not args.json:
+                print(f"DRY RUN — would generate a workflow from {e.get('prompt', 'agent_prompt.md')} and create DRAFT agent '{name}' (never scheduled).")
+            continue
+        me = (client.current_user() or {}).get("email")
+        res = create_agent(client, spec, state, workspace_id=workspace_id, default_email=me, entry=e)
+        ok = res.is_draft or not res.schedule_id
+        all_ok = all_ok and ok
+        results.append({"key": key, "ok": ok, **res.__dict__})
+        if not args.json:
+            print(f"agent '{res.name}' created as {'DRAFT' if res.is_draft else 'ACTIVE?!'} ({res.agent_id}), {res.workflow_nodes} workflow nodes")
+    if args.apply and not args.agent:
+        first = next((r for r in results if r.get("key") == first_key), results[0])
+        state.mark("agent", "ok" if all_ok else "failed", agent_id=first.get("agent_id"), is_draft=first.get("is_draft"),
+                   nodes=first.get("workflow_nodes"), agents={r["key"]: {"agent_id": r.get("agent_id"), "ok": r["ok"]} for r in results})
+    _emit(args, {"ok": all_ok, "results": results}, f"{sum(1 for r in results if r['ok'])}/{len(results)} agent(s) ok" + ("" if args.apply else " (dry run; re-run with --apply)"))
+    return 0 if all_ok else 1
 
 
 def cmd_app(args) -> int:
+    """Build every live_apps[] entry (or --app KEY) from its prompt; existing ones are kept unless --recreate."""
     from .experiences import create_live_app
 
     spec = _spec(args)
@@ -511,44 +605,88 @@ def cmd_app(args) -> int:
     dep = config.wisdom_deployment(spec.wisdom.deployment)
     workspace_id = spec.wisdom.workspace_id or dep.workspace_id
     client = config.wisdom_client(spec.wisdom.deployment)
-    name = spec.live_app.get("name")
-    if state.wisdom.get("app_id") and not args.recreate:
-        back = client.get_app_full(state.wisdom["app_id"])
-        _emit(args, {"ok": True, "app_id": back["id"], "existing": True, **{k: back.get(k) for k in ("liveSpecVersion", "hasUnpublishedChanges")}},
-              f"Live App '{name}' already exists ({back['id']}); use --recreate to build a new one")
+    entries = _select(spec.live_apps, args.app, "live app", args)
+    if not entries:
+        _emit(args, {"ok": True, "skipped": True}, "no live_apps[] / live_app in demo.yaml")
         return 0
-    if not args.apply:
-        _emit(args, {"ok": True, "dry_run": True, "name": name}, f"DRY RUN — would create Live App '{name}' and send live_app_prompt.md to build it (takes 5-15 minutes). Re-run with --apply.")
-        return 0
-    if not args.json:
-        print(f"Creating Live App '{name}' and sending the build prompt (this takes 5-15 minutes)...")
-    res = create_live_app(client, spec, state, workspace_id=workspace_id, timeout_s=args.timeout, echo=not args.json)
-    ok = res.completed
-    state.mark("app", "ok" if ok else "failed", app_id=res.app_id, conversation_id=res.conversation_id, seconds=res.seconds,
-               live_spec_version=res.live_spec_version)
-    _emit(args, {"ok": ok, **res.__dict__},
-          f"Live App '{res.name}' ({res.app_id}) — build {'complete' if ok else 'DID NOT FINISH'} in {res.seconds}s; conversation {res.conversation_id}\n"
-          f"liveSpecVersion={res.live_spec_version} unpublished={res.has_unpublished_changes}\n--- assistant ---\n{res.assistant_text[:1500]}")
-    return 0 if ok else 1
+    results, all_ok, first_key = [], True, entries[0].get("key")
+    for e in entries:
+        name, key = e.get("name"), e.get("key")
+        have = dict((state.wisdom.get("apps") or {}).get(key) or {})
+        if not have.get("app_id") and key == spec.live_apps[0].get("key") and state.wisdom.get("app_id"):
+            have = {"app_id": state.wisdom["app_id"], "conversation_id": state.wisdom.get("app_conversation_id")}
+        if have.get("app_id") and have.get("conversation_id") and not args.recreate:
+            back = client.get_app_full(have["app_id"])
+            results.append({"key": key, "ok": True, "app_id": back["id"], "name": name, "existing": True,
+                            **{k: back.get(k) for k in ("liveSpecVersion", "hasUnpublishedChanges")}})
+            if not args.json:
+                print(f"Live App '{name}' already exists ({back['id']}); use --recreate to build a new one")
+            continue
+        if not args.apply:
+            results.append({"key": key, "ok": True, "dry_run": True, "name": name})
+            if not args.json:
+                print(f"DRY RUN — would create Live App '{name}' and send {e.get('prompt', 'live_app_prompt.md')} to build it (takes 5-15 minutes).")
+            continue
+        if not args.json:
+            print(f"Creating Live App '{name}' and sending the build prompt (this takes 5-15 minutes)...")
+        res = create_live_app(client, spec, state, workspace_id=workspace_id, timeout_s=args.timeout, echo=not args.json, entry=e)
+        ok = res.completed
+        all_ok = all_ok and ok
+        results.append({"key": key, "ok": ok, **res.__dict__})
+        if not args.json:
+            print(f"Live App '{res.name}' ({res.app_id}) — build {'complete' if ok else 'DID NOT FINISH'} in {res.seconds}s; conversation {res.conversation_id}\n"
+                  f"liveSpecVersion={res.live_spec_version} unpublished={res.has_unpublished_changes}\n--- assistant ---\n{res.assistant_text[:1500]}\n")
+    if args.apply and not args.app:
+        first = next((r for r in results if r.get("key") == first_key), results[0])
+        state.mark("app", "ok" if all_ok else "failed", app_id=first.get("app_id"), conversation_id=first.get("conversation_id"),
+                   seconds=first.get("seconds"), live_spec_version=first.get("live_spec_version") or first.get("liveSpecVersion"),
+                   apps={r["key"]: {"app_id": r.get("app_id"), "ok": r["ok"]} for r in results})
+    _emit(args, {"ok": all_ok, "results": results}, f"{sum(1 for r in results if r['ok'])}/{len(results)} Live App(s) ok" + ("" if args.apply else " (dry run; re-run with --apply)"))
+    return 0 if all_ok else 1
 
 
 # ---------------------------------------------------------------- health
+def cmd_s3(args) -> int:
+    from .s3_sync import sync
+
+    spec = _spec(args)
+    state = State.load(spec.dir)
+    res = sync(spec, apply=args.apply, echo=not args.json)
+    if args.apply:
+        state.mark("s3", "ok" if res.get("ok") else "failed", **{k: v for k, v in res.items() if k != "ok"})
+    _emit(args, res, (f"{'uploaded' if args.apply else 'would upload'} {res.get('uploaded', res.get('would_upload'))} of {res.get('files')} PDFs to s3://{res.get('bucket')}/{res.get('prefix')}/"
+                      if res.get("ok") else f"FAILED: {res.get('error') or res}"))
+    return 0 if res.get("ok") else 1
+
+
 def cmd_health(args) -> int:
-    """Trigger a Domain Health analysis run and LEAVE IT RUNNING: it is the final step of every build so an
-    SE can demo the suggestions it produces in the Domain Health tab. Nothing in the pipeline acts on them."""
+    """Trigger the Domain Health ANALYSIS (what the "Run Analysis" button on the domain's Health ->
+    Recommendations tab does: triggerEvalAnalysis, verified 2026-10-16) and LEAVE IT RUNNING: it is the
+    final step of every build so an SE can demo the recommendations it produces. Nothing in the pipeline
+    acts on them. `triggerDomainHealthCheck` is only the quick table-health check (10 s, no
+    recommendations); it is run as well so the Health level is fresh."""
     spec = _spec(args)
     state = State.load(spec.dir)
     domain_id = _need_domain(args, state)
     if not args.apply:
-        _emit(args, {"ok": True, "dry_run": True}, f"DRY RUN — would queue a Domain Health analysis run for {domain_id}. Re-run with --apply.")
+        _emit(args, {"ok": True, "dry_run": True}, f"DRY RUN — would start the Domain Health analysis for {domain_id}. Re-run with --apply.")
         return 0
     client = config.wisdom_client(spec.wisdom.deployment)
-    res = client.trigger_domain_health_check(domain_id)
-    code = (res.get("status") or {}).get("code")
-    ok = code in (None, "OK", "SUCCESS") or bool(res.get("jobRunId")) or bool(res.get("alreadyQueued"))
-    state.set("wisdom", "health_job_run_id", res.get("jobRunId"))
-    state.mark("health", "ok" if ok else "failed", job_run_id=res.get("jobRunId"), already_queued=res.get("alreadyQueued"), code=code)
-    _emit(args, {"ok": ok, **res}, f"Domain Health analysis {'already queued' if res.get('alreadyQueued') else 'queued'} (job {res.get('jobRunId')}); left running — the SE demos its suggestions from the domain's Domain Health tab; nothing here acts on them.")
+    before = client.eval_analysis_status(domain_id) or {}
+    if str(before.get("analysisStatus") or "").upper() == "RUNNING":
+        res = {"status": "RUNNING", "message": "an analysis is already running"}
+    else:
+        res = client.trigger_eval_analysis(domain_id, include_schema_analysis=True, require_rq_eval=False)
+    quick = client.trigger_domain_health_check(domain_id)
+    after = client.eval_analysis_status(domain_id) or {}
+    status = str(after.get("analysisStatus") or res.get("status") or "")
+    ok = status.upper() in ("RUNNING", "QUEUED", "PENDING", "OK", "SUCCESS", "COMPLETED")
+    state.set("wisdom", "health_job_run_id", quick.get("jobRunId"))
+    state.set("wisdom", "health_analysis", {"status": status, "eval_run_id": res.get("evalRunId"), "run_group_id": res.get("runGroupId"), "job_run_id": res.get("jobRunId")})
+    state.mark("health", "ok" if ok else "failed", analysis_status=status, trigger=res, quick_check_job=quick.get("jobRunId"))
+    _emit(args, {"ok": ok, "analysis": after, "trigger": res, "quick_check": quick},
+          f"Domain Health analysis {status} for the domain (the Recommendations tab fills when it completes; it can take a while); "
+          f"quick health check job {quick.get('jobRunId')}. Left running — the SE demos the recommendations; nothing here acts on them.")
     return 0 if ok else 1
 
 
@@ -561,15 +699,20 @@ def cmd_teardown(args) -> int:
     spec = _spec(args)
     state = State.load(spec.dir)
     w = dict(state.wisdom)
-    plan = [("Live App", w.get("app_id")), ("agent", w.get("agent_id")), ("eval set", w.get("eval_set_id")), ("domain", w.get("domain_id"))]
+    shared = spec.wisdom.existing_domain or w.get("domain_owned") is False
+    plan = [("Live App", w.get("app_id")), ("agent", w.get("agent_id")), ("eval set", w.get("eval_set_id"))]
+    if not shared:
+        plan.append(("domain", w.get("domain_id")))
     plan = [(k, v) for k, v in plan if v]
+    kept_note = (f"\nThe domain {w.get('domain_id')} is EXISTING (shared) and is KEPT, as are our database, extractor files, accepted "
+                 "suggestions and S3 dataset inside it (ids stay in .state.json for a manual undo)." if shared else "")
     if not plan:
-        _emit(args, {"ok": True, "deleted": []}, "nothing recorded in .state.json to delete")
+        _emit(args, {"ok": True, "deleted": []}, "nothing recorded in .state.json to delete" + kept_note)
         return 0
     if not args.i_mean_it:
         _emit(args, {"ok": True, "dry_run": True, "would_delete": plan},
               "DRY RUN — would PERMANENTLY delete on " + spec.wisdom.deployment + ":\n" + "\n".join(f"  {k}: {v}" for k, v in plan) +
-              "\nRe-run with --i-mean-it to delete. The Snowflake database and the shared connection are kept.")
+              "\nRe-run with --i-mean-it to delete. The Snowflake database and the shared connection are kept." + kept_note)
         return 0
     client = config.wisdom_client(spec.wisdom.deployment)
     deleted, failures = [], []
@@ -591,7 +734,11 @@ def cmd_teardown(args) -> int:
             if not args.json:
                 print(f"  FAILED {kind} {ident}: {str(exc)[:200]}")
     # forget the Wisdom ids and the Wisdom-side steps; keep connection_id and Snowflake steps
-    keep = {k: v for k, v in state.wisdom.items() if k == "connection_id"}
+    # (on a shared domain also keep everything a manual undo would need)
+    keep_keys = {"connection_id", "connection_created"} | ({"domain_id", "domain_owned", "suggestions_preexisting", "accepted_suggestion_ids",
+                                                            "extraction_uploaded", "extraction_runs", "dataset_id", "s3_connection_id", "s3_dataset_id"}
+                                                           if shared else set())
+    keep = {k: v for k, v in state.wisdom.items() if k in keep_keys}
     state.overwrite(sections={"wisdom": keep}, drop_steps=("publish", "eval", "health", "app", "chat", "agent"))
     ok = not failures
     _emit(args, {"ok": ok, "deleted": deleted, "failures": failures},
@@ -682,7 +829,12 @@ def cmd_status(args) -> int:
 def cmd_doctor(args) -> int:
     from .doctor import run_checks
 
-    checks = run_checks(args.deployment, network=not args.offline)
+    spec = None
+    deployment = args.deployment
+    if getattr(args, "demo", None):
+        spec = _spec(argparse.Namespace(name=args.demo))
+        deployment = spec.wisdom.deployment
+    checks = run_checks(deployment, network=not args.offline, spec=spec)
     if args.json:
         print(json.dumps([c.__dict__ for c in checks], indent=2))
     else:
@@ -709,6 +861,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = add("doctor", cmd_doctor, "check keys, Snowflake and Wisdom access", demo=False)
     d.add_argument("--deployment", default="proddemo")
     d.add_argument("--offline", action="store_true")
+    d.add_argument("--demo", help="also check a demo's target (deployment, workspace and, for existing_domain demos, the domain)")
 
     n = add("new", cmd_new, "scaffold demos/<name>/")
     n.add_argument("--title")
@@ -724,6 +877,7 @@ def build_parser() -> argparse.ArgumentParser:
     r = add("rq-check", cmd_rq_check, "execute every reviewed query; write build/reviewed-queries.csv")
     r.add_argument("--snowflake", action="store_true")
     r.add_argument("--keep-duckdb", action="store_true")
+    r.add_argument("--domain", action="store_true", help="also run cross_db-tagged queries through the Wisdom SQL runner on the target domain")
 
     dd = add("ddl", cmd_ddl, "run the DDL statement by statement (dry-run without --apply)")
     dd.add_argument("--apply", action="store_true")
@@ -737,24 +891,29 @@ def build_parser() -> argparse.ArgumentParser:
     add("docs", cmd_docs, "render documents[] markdown specs to build/docs/*.pdf")
     pb = add("publish", cmd_publish, "create/update the Wisdom domain: connection, database, knowledge, reviewed queries (dry-run without --apply)")
     pb.add_argument("--apply", action="store_true")
-    pb.add_argument("--only", nargs="*", help="run only these steps: connection domain database instructions knowledge metrics reviewed_queries lookup documents extraction")
+    pb.add_argument("--only", nargs="*", help="run only these steps: connection domain database federated instructions knowledge metrics reviewed_queries lookup documents extraction skills s3_dataset")
     ev = add("eval", cmd_eval, "build the eval set from the reviewed queries, run it at least 3 times, report the mean score and flaky prompts")
     ev.add_argument("--timeout", type=int, default=1200)
     ev.add_argument("--report-last", action="store_true", help="report the last completed run instead of starting one")
     add("metrics-check", cmd_metrics_check, "compile every metrics.csv expression in DuckDB")
     ch = add("chat", cmd_chat, "ask the follow-up question in a visible conversation and judge the answer")
     ch.add_argument("--apply", action="store_true")
-    ch.add_argument("--question")
+    ch.add_argument("--question", help="ask this ad-hoc question instead of chats[] (judged with the first entry's expected points)")
+    ch.add_argument("--chat", help="only the chats[] entry with this key")
     ch.add_argument("--timeout", type=int, default=420)
     ap = add("app", cmd_app, "create the Live App from live_app_prompt.md (one prompt; takes minutes)")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--recreate", action="store_true")
+    ap.add_argument("--app", help="only the live_apps[] entry with this key")
     ap.add_argument("--timeout", type=int, default=1500)
     ag = add("agent", cmd_agent, "create the agent from agent_prompt.md as a DRAFT (never runs)")
     ag.add_argument("--apply", action="store_true")
     ag.add_argument("--recreate", action="store_true")
+    ag.add_argument("--agent", help="only the agents[] entry with this key")
     td = add("teardown", cmd_teardown, "PERMANENTLY delete the demo's Wisdom app, agent, eval set and domain (dry-run without --i-mean-it)")
     td.add_argument("--i-mean-it", action="store_true")
+    s3p = add("s3", cmd_s3, "upload the generated contract PDFs (build/contracts) to the S3 bucket configured in .env (stretch: Wisdom reads them through an S3 connection)")
+    s3p.add_argument("--apply", action="store_true", help="upload; without it, report what would be uploaded")
     he = add("health", cmd_health, "queue a Domain Health analysis run and leave it running for the SE (always the last step of a build)")
     he.add_argument("--apply", action="store_true")
     add("report", cmd_report, "write DEMO_REPORT.md from .state.json")

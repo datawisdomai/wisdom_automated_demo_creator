@@ -118,10 +118,19 @@ _STOP = {"about", "with", "from", "that", "this", "than", "versus", "there", "th
          "recent", "prior", "weeks", "week", "main", "driver", "rising", "down", "customer", "customers", "window", "renewal"}
 
 
+def _first_key(entries: list[dict]) -> str | None:
+    return entries[0].get("key") if entries else None
+
+
 def ask_followup(client: Client, spec: DemoSpec, state: State, *, question: str | None = None, timeout_s: float = 420,
-                 hidden: bool = False) -> ChatAnswer:
+                 hidden: bool = False, entry: dict | None = None) -> ChatAnswer:
+    """Ask one chat question (`entry` = one of spec.chats, default the first) in a visible conversation
+    and judge the answer against the entry's expected_points. Per-entry ids live in state
+    `wisdom.chats[<key>]`; the first entry is mirrored into the legacy `followup_conversation_id`."""
     domain_id = state.wisdom["domain_id"]
-    question = question or spec.chat.get("followup_question")
+    entry = entry or spec.chat
+    key = entry.get("key") or _first_key(spec.chats) or "followup"
+    question = question or entry.get("followup_question") or entry.get("question")
     if not question:
         raise ValueError("chat.followup_question is not set in demo.yaml")
     token = client.token
@@ -138,12 +147,16 @@ def ask_followup(client: Client, spec: DemoSpec, state: State, *, question: str 
         text, completed = asyncio.run(run())
     except _SocketUnavailable:
         text, completed = poll_answer(client, conv_id, timeout_s=timeout_s - (time.time() - t0))
-    hits, misses = _judge(text, list(spec.chat.get("expected_points") or []))
+    hits, misses = _judge(text, list(entry.get("expected_points") or []))
     ans = ChatAnswer(conv_id, question, text, round(time.time() - t0, 1), completed, hits, misses)
     convs = list(state.wisdom.get("conversations") or [])
     convs.append({"id": conv_id, "question": question, "completed": completed, "score": ans.score, "chars": len(text)})
     state.set("wisdom", "conversations", convs[-10:])
-    state.set("wisdom", "followup_conversation_id", conv_id)
+    chats = dict(state.wisdom.get("chats") or {})
+    chats[key] = {"conversation_id": conv_id, "question": question, "score": ans.score, "completed": completed}
+    state.set("wisdom", "chats", chats)
+    if key == (_first_key(spec.chats) or key):
+        state.set("wisdom", "followup_conversation_id", conv_id)
     return ans
 
 
@@ -229,37 +242,110 @@ def convert_workflow(generated: dict, *, domain_id: str, default_email: str | No
     return out
 
 
-def create_agent(client: Client, spec: DemoSpec, state: State, *, workspace_id: str, default_email: str | None = None) -> AgentResult:
-    """Generate the workflow from the agent prompt (cached in build/agent_workflow.json),
-    convert it to the input shape, create it as a DRAFT (never scheduled), read it back."""
+def _clean_delta(d: dict | None, fallback: str = "") -> dict:
+    """Output Delta -> DeltaInput: keep text inserts only (the input type has no trajectory/visualization elements)."""
+    ops = []
+    for op in (d or {}).get("ops") or []:
+        ins = op.get("insert") or {}
+        if isinstance(ins, dict) and ins.get("text") is not None:
+            ops.append({"insert": {"text": ins["text"]}})
+    return {"ops": ops or [{"insert": {"text": fallback}}]}
+
+
+def specification_to_input(generated: dict, *, domain_id: str, default_email: str | None = None) -> dict:
+    """Turn generateWorkflowFromPrompt's `specification` (AnalysisScheduleTask, 2026-10 shape) into the
+    AnalysisScheduleTaskInput for createWorkflowAgent: drop nulls, reduce deltas to text, default the
+    domain id and an empty email recipient list."""
+    wf = generated.get("workflow") or {}
+    nodes = []
+    for n in wf.get("nodes") or []:
+        node = {"id": n["id"], "type": n["type"], "title": n.get("title") or n["type"], "instruction": _clean_delta(n.get("instruction"), n.get("title") or ""),
+                "positionX": float(n.get("positionX") or 0), "positionY": float(n.get("positionY") or 0)}
+        if n.get("handle"):
+            node["handle"] = n["handle"]
+        cfg_in = n.get("config") or {}
+        cfg: dict = {}
+        if cfg_in.get("domainId") or n["type"] in ("DATA_FETCH", "REASONING_ANALYSIS", "REASONING"):
+            cfg["domainId"] = cfg_in.get("domainId") or domain_id
+        if cfg_in.get("triggerType"):
+            cfg["triggerType"] = cfg_in["triggerType"]
+        if cfg_in.get("timing"):
+            cfg["timing"] = {k: v for k, v in cfg_in["timing"].items() if v is not None}
+        if cfg_in.get("delivery"):
+            d = cfg_in["delivery"]
+            delivery = {"type": d["type"]}
+            if d.get("emailConfig") is not None or d["type"] == "EMAIL":
+                to = list((d.get("emailConfig") or {}).get("toEmailIds") or [])
+                delivery["emailConfig"] = {"toEmailIds": to or ([default_email] if default_email else [])}
+            if d.get("slackConfig"):
+                delivery["slackConfig"] = {"channelNames": list(d["slackConfig"].get("channelNames") or [])}
+            if d.get("teamsConfig"):
+                delivery["teamsConfig"] = {"userEmails": list(d["teamsConfig"].get("userEmails") or [])}
+            if d.get("webhookConfig"):
+                delivery["webhookConfig"] = {"webhookUrls": list(d["webhookConfig"].get("webhookUrls") or [])}
+            cfg["delivery"] = delivery
+        if cfg_in.get("routeMap"):
+            cfg["routeMap"] = [{"condition": _clean_delta(r.get("condition")), "edgeId": r["edgeId"], "branchIndex": int(r.get("branchIndex") or 0)}
+                               for r in cfg_in["routeMap"] if _clean_delta(r.get("condition"))["ops"][0]["insert"]["text"].strip()]
+        if cfg:
+            node["config"] = cfg
+        nodes.append(node)
+    node_ids = {n["id"] for n in nodes}
+    edges = [{"id": e["id"], "fromNodeId": e["fromNodeId"], "toNodeId": e["toNodeId"]} for e in (wf.get("edges") or [])
+             if e.get("fromNodeId") in node_ids and e.get("toNodeId") in node_ids]
+    out = {"nodes": nodes, "edges": edges}
+    notes = ((wf.get("canvasAnnotation") or {}).get("notes")) or []
+    if notes:
+        out["canvasAnnotation"] = {"notes": [{"id": x["id"], "text": x.get("text") or "", "positionX": float(x.get("positionX") or 0), "positionY": float(x.get("positionY") or 0)} for x in notes]}
+    return out
+
+
+def create_agent(client: Client, spec: DemoSpec, state: State, *, workspace_id: str, default_email: str | None = None,
+                 entry: dict | None = None) -> AgentResult:
+    """Generate the workflow from the agent prompt (cached in build/agent_workflow[_<key>].json),
+    convert it to the input shape, create it as a DRAFT (never scheduled), read it back.
+    `entry` is one of spec.agents (default the first); ids go to state `wisdom.agents[<key>]`,
+    the first entry also to the legacy `agent_id` / `agent_name`."""
     domain_id = state.wisdom["domain_id"]
-    name = spec.agent.get("name") or f"{spec.title} agent"
-    prompt_path = spec.dir / spec.agent.get("prompt", "agent_prompt.md")
+    entry = entry or spec.agent
+    key = entry.get("key") or _first_key(spec.agents) or "agent"
+    first = key == (_first_key(spec.agents) or key)
+    name = entry.get("name") or f"{spec.title} agent"
+    prompt_path = spec.dir / entry.get("prompt", "agent_prompt.md")
     prompt = _prompt_body(prompt_path.read_text())
-    cache = spec.paths.ensure().build / "agent_workflow.json"
+    cache = spec.paths.ensure().build / ("agent_workflow.json" if first else f"agent_workflow_{key}.json")
     gen = None
     if cache.is_file():
         try:
             cached = json.loads(cache.read_text())
-            if cached.get("workflow"):
-                gen = {"workflowJson": json.dumps(cached["workflow"]), "agentName": cached.get("agentName"), "message": cached.get("message", "")}
+            if cached.get("specification") or cached.get("workflow"):
+                gen = cached
         except (ValueError, KeyError):
             gen = None
     if gen is None:
-        gen = client.generate_workflow_from_prompt(prompt, domain_id=domain_id, workspace_id=workspace_id)
-        if gen.get("workflowJson"):
-            cache.write_text(json.dumps({"agentName": gen.get("agentName"), "message": gen.get("message"), "workflow": json.loads(gen["workflowJson"])}, indent=2))
-    workflow_json = gen.get("workflowJson")
-    if not workflow_json:
-        raise RuntimeError(f"generateWorkflowFromPrompt returned no workflow: {gen.get('message', '')[:300]}")
-    workflow = convert_workflow(json.loads(workflow_json), domain_id=domain_id, default_email=default_email)
+        gen = client.generate_workflow_from_prompt(prompt, domain_id=domain_id, workspace_id=workspace_id, agent_name=name)
+        if gen.get("specification") or gen.get("workflowJson"):
+            cache.write_text(json.dumps({"agentName": gen.get("agentName"), "message": gen.get("message"), "specification": gen.get("specification"),
+                                         "workflow": json.loads(gen["workflowJson"]) if gen.get("workflowJson") else None}, indent=2))
+    if gen.get("specification"):
+        # 2026-10 API: the generator already returns an AnalysisScheduleTask
+        gs = gen["specification"]
+        workflow = specification_to_input(gs, domain_id=domain_id, default_email=default_email)
+        description = gs.get("analysisDescription") or gen.get("message") or prompt
+        instruction = gs.get("instruction") or prompt
+    else:
+        workflow_json = gen.get("workflowJson") or (json.dumps(gen["workflow"]) if gen.get("workflow") else None)
+        if not workflow_json:
+            raise RuntimeError(f"generateWorkflowFromPrompt returned no workflow: {gen.get('message', '')[:300]}")
+        workflow = convert_workflow(json.loads(workflow_json), domain_id=domain_id, default_email=default_email)
+        description, instruction = (gen.get("message") or prompt), prompt
     nodes = workflow["nodes"]
     spec_input = {
         "analysisDomainId": domain_id,
         "agentName": name,
-        "analysisDescription": (gen.get("message") or prompt)[:4000],
+        "analysisDescription": description[:4000],
         "useDeepAnalysis": False,
-        "instruction": prompt[:4000],
+        "instruction": instruction[:4000],
         "workflow": workflow,
     }
     created = client.create_workflow_agent(spec_input, workspace_id=workspace_id, as_draft=True)
@@ -268,8 +354,12 @@ def create_agent(client: Client, spec: DemoSpec, state: State, *, workspace_id: 
     if back.get("scheduleId") and not back.get("isDraft"):
         client.update_agent_state(agent_id, "INACTIVE", reason="demo creator: created disabled")
         back = client.get_agent(agent_id, workspace_id=workspace_id) or back
-    state.set("wisdom", "agent_id", agent_id)
-    state.set("wisdom", "agent_name", name)
+    agents = dict(state.wisdom.get("agents") or {})
+    agents[key] = {"agent_id": agent_id, "agent_name": name, "is_draft": bool(back.get("isDraft")), "nodes": len(nodes)}
+    state.set("wisdom", "agents", agents)
+    if first:
+        state.set("wisdom", "agent_id", agent_id)
+        state.set("wisdom", "agent_name", name)
     return AgentResult(agent_id, name, bool(back.get("isDraft")), back.get("scheduleId"), len(nodes), gen.get("message", ""))
 
 
@@ -296,23 +386,41 @@ class LiveAppResult:
 
 
 def create_live_app(client: Client, spec: DemoSpec, state: State, *, workspace_id: str, timeout_s: float = 1500,
-                    echo: bool = True) -> LiveAppResult:
+                    echo: bool = True, entry: dict | None = None) -> LiveAppResult:
     """Mirror the UI: createApp -> conversation with liveAppEditPolicy EDIT ->
     setActiveAppConversation -> one prompt message carrying the app's dashboard
-    reference -> wait for the assistant to finish -> read the app back."""
+    reference -> wait for the assistant to finish -> read the app back.
+    `entry` is one of spec.live_apps (default the first); ids go to state `wisdom.apps[<key>]`,
+    the first entry also to the legacy `app_id` / `app_name` / `app_conversation_id`."""
     domain_id = state.wisdom["domain_id"]
-    name = spec.live_app.get("name") or f"{spec.title} Live App"
-    prompt = _prompt_body((spec.dir / spec.live_app.get("prompt", "live_app_prompt.md")).read_text())
-    if state.wisdom.get("app_id") and not state.wisdom.get("app_conversation_id"):
-        app = client.get_app_full(state.wisdom["app_id"])  # shell exists from an earlier attempt; build into it
+    entry = entry or spec.live_app
+    key = entry.get("key") or _first_key(spec.live_apps) or "app"
+    first = key == (_first_key(spec.live_apps) or key)
+    name = entry.get("name") or f"{spec.title} Live App"
+    prompt = _prompt_body((spec.dir / entry.get("prompt", "live_app_prompt.md")).read_text())
+    apps = dict(state.wisdom.get("apps") or {})
+    mine = dict(apps.get(key) or {})
+    if first and not mine and state.wisdom.get("app_id"):
+        mine = {"app_id": state.wisdom["app_id"], "conversation_id": state.wisdom.get("app_conversation_id")}
+    if mine.get("app_id") and not mine.get("conversation_id"):
+        app = client.get_app_full(mine["app_id"])  # shell exists from an earlier attempt; build into it
     else:
         app = client.create_app(workspace_id, name, domain_id)
     app_id, dashboard_id = app["id"], app["dashboardId"]
-    state.set("wisdom", "app_id", app_id)
-    state.set("wisdom", "app_name", name)
+
+    def _remember(**kw):
+        apps[key] = {**(apps.get(key) or {}), "app_id": app_id, "app_name": name, **kw}
+        state.set("wisdom", "apps", apps)
+        if first:
+            state.set("wisdom", "app_id", app_id)
+            state.set("wisdom", "app_name", name)
+            if "conversation_id" in kw:
+                state.set("wisdom", "app_conversation_id", kw["conversation_id"])
+
+    _remember()
     conv_id = client.create_conversation_full(domain_id, hidden=False, workspace_id=workspace_id, live_app_edit_policy="EDIT",
                                               request_channel_type="LIVE_APP", channel_source_id=app_id)
-    state.set("wisdom", "app_conversation_id", conv_id)
+    _remember(conversation_id=conv_id)
     try:
         client.set_active_app_conversation(app_id, conv_id)
     except GraphQLError as exc:  # not fatal: the dashboard reference on the message still targets the app
@@ -334,5 +442,10 @@ def create_live_app(client: Client, spec: DemoSpec, state: State, *, workspace_i
     except _SocketUnavailable:
         text, completed = poll_answer(client, conv_id, timeout_s=timeout_s - (time.time() - t0), poll_s=20, settle_polls=3)
     back = client.get_app_full(app_id)
+    # The conversation can finish while the build itself was stopped ("Visualization generation failed",
+    # "This response was stopped"): an app with no live spec after the build is a failed build.
+    low = (text or "").lower()
+    if completed and (back.get("liveSpecVersion") is None or "generation failed" in low or "response was stopped" in low):
+        completed = False
     return LiveAppResult(app_id, name, conv_id, dashboard_id, completed, round(time.time() - t0, 1), text,
                          back.get("liveSpecVersion"), back.get("hasUnpublishedChanges"))

@@ -26,6 +26,7 @@ class ConnectionInfo:
     snowflake_warehouse: str | None = None
     database_filters: tuple[str, ...] = ()
     created_at: str | None = None
+    host: str | None = None          # non-Snowflake warehouses (Teradata): host the connection points at
 
 
 class Client:
@@ -550,6 +551,7 @@ class Client:
         for node in data["connections"]["nodes"]:
             d = node.get("details") or {}
             sf = d.get("snowflake") or {}
+            td = d.get("teradata") or {}
             out.append(ConnectionInfo(
                 id=node["id"],
                 name=d.get("name") or "",
@@ -559,8 +561,9 @@ class Client:
                 snowflake_account=sf.get("account"),
                 snowflake_role=sf.get("role"),
                 snowflake_warehouse=sf.get("warehouse"),
-                database_filters=tuple(sf.get("databaseFilters") or ()),
+                database_filters=tuple(sf.get("databaseFilters") or td.get("databaseFilters") or ()),
                 created_at=node.get("createdAt"),
+                host=td.get("host"),
             ))
         return out
 
@@ -728,6 +731,28 @@ class Client:
                           op_name="handleDatasetFileUpload")["handleDatasetFileUpload"]
         return {"dataset_id": dataset_id, "keys": [u["key"] for u in urls], "ok": bool(ok)}
 
+    # ---- S3 datasets (demo creator) ----
+    def create_connection_dataset(self, connection_id: str, name: str, *, prefix: str | None = None, description: str = "") -> dict:
+        ds = {"name": name, "description": description, "s3DatasetConfigurationV2": {"connectionId": connection_id, "prefix": prefix}}
+        return self.request(ops.CREATE_CONNECTION_DATASET, {"connectionId": connection_id, "dataset": ds}, op_name="createConnectionDataset")["createConnectionDataset"]
+
+    def connection_datasets(self, connection_id: str) -> list[dict]:
+        return self.request(ops.CONNECTION_DATASETS, {"connectionId": connection_id}, op_name="connectionDatasets")["connectionDatasets"]
+
+    def trigger_dataset_crawl(self, dataset_id: str, domain_id: str) -> dict:
+        return self.request(ops.TRIGGER_DATASET_CRAWL, {"datasetId": dataset_id, "domainId": domain_id}, op_name="triggerDatasetCrawl")["triggerDatasetCrawl"]
+
+    def set_domain_dataset_reference(self, domain_id: str, dataset_id: str, *, active: bool = True, expected_revision: int = 0) -> dict:
+        inp = {"domainId": domain_id, "datasetId": dataset_id, "active": active, "expectedRevision": expected_revision,
+               "selection": {"allFiles": True, "fileIds": [], "folders": []}}
+        return self.request(ops.SET_DOMAIN_DATASET_REFERENCE, {"input": inp}, op_name="setDomainDatasetReference")["setDomainDatasetReference"]
+
+    def domain_dataset_references(self, domain_id: str) -> dict:
+        return self.request(ops.DOMAIN_DATASET_REFERENCES, {"domainId": domain_id}, op_name="domainDatasetReferences")["domainDatasetReferences"]
+
+    def connection_dataset_state(self, dataset_id: str) -> dict:
+        return self.request(ops.CONNECTION_DATASET_STATE, {"datasetId": dataset_id}, op_name="connectionDataset")["connectionDataset"]
+
     # ---- live apps (demo creator) ----
     def create_app(self, workspace_id: str, name: str, domain_id: str) -> dict:
         return self.request(ops.CREATE_APP, {"workspaceId": workspace_id, "name": name, "domainId": domain_id}, op_name="createApp")["createApp"]
@@ -768,8 +793,11 @@ class Client:
         return self.request(ops.CHAT_MESSAGES, {"conversationId": conversation_id}, op_name="chatMessages")["chatMessages"]["nodes"]
 
     # ---- agents (demo creator) ----
-    def generate_workflow_from_prompt(self, prompt: str, *, domain_id: str, workspace_id: str | None = None) -> dict:
-        inp = {"messages": [{"role": "user", "content": prompt}], "domainId": domain_id}
+    def generate_workflow_from_prompt(self, prompt: str, *, domain_id: str, workspace_id: str | None = None, agent_name: str = "Agent") -> dict:
+        """2026-10-26: `GenerateWorkflowFromPromptInput` lost `domainId`; the domain travels in
+        `currentSpecification.analysisDomainId` (a seed AnalysisScheduleTaskInput)."""
+        inp = {"messages": [{"role": "user", "content": prompt}],
+               "currentSpecification": {"analysisDomainId": domain_id, "agentName": agent_name, "analysisDescription": prompt[:4000], "useDeepAnalysis": False}}
         if workspace_id:
             inp["workspaceID"] = workspace_id
         return self.request(ops.GENERATE_WORKFLOW_FROM_PROMPT, {"input": inp}, op_name="generateWorkflowFromPrompt")["generateWorkflowFromPrompt"]
@@ -893,12 +921,16 @@ class Client:
         domain_id: str,
         items: list,
         draft_id: str | None = None,
+        *,
+        custom_grading: str | None = None,
     ) -> dict:
         """Create an eval set.
 
         `items` accepts either:
           - flat single-turn list: [{"prompt": "...", "sql": ["..."]}, ...]
           - doubly-nested multi-turn: [[{...}, {...}], [{...}], ...]
+        `custom_grading` is free text the judge reads next to the ground truth
+        (`customGradingInstructions`): what to compare, what not to fail on.
         """
         input_obj: dict[str, Any] = {
             "name": name,
@@ -907,6 +939,8 @@ class Client:
         }
         if draft_id is not None:
             input_obj["draftId"] = draft_id
+        if custom_grading:
+            input_obj["customGradingInstructions"] = custom_grading
         data = self.request(
             ops.CREATE_EVAL_SET, {"input": input_obj}, op_name="createEvalSet"
         )
@@ -917,11 +951,21 @@ class Client:
         eval_set_id: str,
         items: list,
         name: str | None = None,
+        *,
+        domain_id: str | None = None,
+        custom_grading: str | None = None,
     ) -> dict:
+        """Replace an eval set's items (and name). `UpdateEvalSetInput.domainId` became required in
+        the 2026-10 schema, so pass the set's domain. `custom_grading` sets the judge's
+        `customGradingInstructions` (left untouched when None)."""
         input_obj: dict[str, Any] = {
             "id": eval_set_id,
             "items": self._normalize_items(items),
         }
+        if domain_id:
+            input_obj["domainId"] = domain_id
+        if custom_grading is not None:
+            input_obj["customGradingInstructions"] = custom_grading
         if name is not None:
             input_obj["name"] = name
         data = self.request(
@@ -1194,11 +1238,9 @@ class Client:
     ) -> dict:
         data = self.request(
             ops.TRIGGER_EVAL_ANALYSIS,
-            {
-                "domainId": domain_id,
-                "includeSchemaAnalysis": include_schema_analysis,
-                "requireRqEval": require_rq_eval,
-            },
+            # include_schema_analysis is accepted for backwards compatibility but no longer
+            # sent: the live schema dropped the argument (proddemo, 2026-10-16).
+            {"domainId": domain_id, "requireRqEval": require_rq_eval},
             op_name="triggerEvalAnalysis",
         )
         return data["triggerEvalAnalysis"]
@@ -1514,3 +1556,31 @@ class Client:
             "Use a storage connector (S3, SharePoint, Azure Blob) and "
             "refresh_connection() instead, or contact WisdomAI for a private endpoint."
         )
+
+    # ------------------------------------------------------------------ domain skills
+    def list_domain_skills(self, domain_id: str, *, include_markdown: bool = True) -> list[dict]:
+        """Skills of a domain (name, description, version, isActive, availability, markdown)."""
+        data = self.request(ops.DOMAIN_SKILLS, {"domainId": domain_id, "includeMarkdown": include_markdown}, op_name="domainSkills")
+        return list(data.get("domainSkills") or [])
+
+    def create_domain_skill(self, domain_id: str, skill_markdown: str, *, availability: list[str] | None = None) -> dict:
+        """Create a skill from its markdown (frontmatter `name:` / `description:` + body).
+        Returns the created `Skill` (id, version, name, ...)."""
+        inp = {"domainId": domain_id, "skillMarkdown": skill_markdown,
+               "availability": list(availability or ["CHAT", "COPILOT", "AGENTS"])}
+        data = self.request(ops.CREATE_DOMAIN_SKILL, {"input": inp}, op_name="createDomainSkill")
+        return data["createDomainSkill"]
+
+    def update_domain_skill(self, domain_id: str, skill_id: str, version: int, skill_markdown: str, *,
+                            availability: list[str] | None = None) -> dict:
+        """Replace a skill's markdown (creates a new version; `version` is the current one)."""
+        inp = {"domainId": domain_id, "id": skill_id, "version": int(version), "skillMarkdown": skill_markdown}
+        if availability is not None:
+            inp["availability"] = list(availability)
+        data = self.request(ops.UPDATE_DOMAIN_SKILL, {"input": inp}, op_name="updateDomainSkill")
+        return data["updateDomainSkill"]
+
+    def set_domain_skill_active(self, domain_id: str, skill_id: str, is_active: bool) -> dict:
+        data = self.request(ops.SET_DOMAIN_SKILL_ACTIVE, {"id": skill_id, "domainId": domain_id, "isActive": bool(is_active)},
+                            op_name="setDomainSkillActive")
+        return data["setDomainSkillActive"]

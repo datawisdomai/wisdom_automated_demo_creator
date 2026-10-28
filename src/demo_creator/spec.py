@@ -53,6 +53,34 @@ class ControlPoint:
 
 
 @dataclass
+class FederatedSource:
+    """Tables from ANOTHER connection (somebody else's warehouse, e.g. a partner's Teradata) attached
+    read-only to the demo's domain for a federation beat. The pipeline never creates, updates or
+    refreshes that connection; it only adds the listed tables to the domain's relationship graph and
+    binds the reviewed queries that carry `source=<connection>` to it."""
+    connection: str                       # connection name as shown in Wisdom (looked up, never created)
+    database: str                         # database name as the connection exposes it
+    tables: list[str]                     # table/view names to attach (case as the connection exposes them)
+    dialect: str = "snowflake"            # SQL dialect for reviewed queries / runSqlQuery on this source
+    schema: str | None = None             # schema filter; None = any (Teradata exposes '' as schema)
+    description: str | None = None        # one paragraph for the domain instructions (what this source is)
+
+
+@dataclass
+class SkillSpec:
+    """A domain skill: a markdown file with `name:` / `description:` frontmatter and an instruction
+    body. Skills normally reach the domain through the context extractor (SKILL agent, UPSERT_SKILL
+    suggestions) from an authored runbook; the publish step `skills` creates any skill listed here
+    that the extractor did not produce, straight from this markdown, and reads every one back."""
+    file: str                                   # path relative to the demo dir (skills/<name>.md)
+    availability: list[str] = field(default_factory=lambda: ["CHAT", "COPILOT", "AGENTS"])
+
+    @property
+    def name(self) -> str:
+        return Path(self.file).stem
+
+
+@dataclass
 class WisdomSpec:
     deployment: str = "proddemo"
     workspace_id: str | None = None
@@ -68,6 +96,14 @@ class WisdomSpec:
     eval: dict[str, Any] = field(default_factory=dict)
     context_mode: str = "extractor"            # extractor (default: all context via the context extractor) | direct (legacy CSV/API path)
     extraction: dict[str, Any] = field(default_factory=dict)   # accept: [knowledge, synonyms, metrics, reviewed_queries]; coverage_threshold: 0.9
+    # Existing-domain mode: ADD this demo's database and context to a domain somebody else built.
+    # The domain is never created, renamed, deleted or (by default) re-instructed; see publish.py.
+    existing_domain: bool = False
+    domain_id: str | None = None
+    instructions_mode: str = "replace"         # replace (own domain) | append (only our delimited block) | skip
+    connection_create: bool = True             # create the Snowflake connection when it does not exist
+    federated_sources: list[FederatedSource] = field(default_factory=list)   # read-only tables from other connections
+    skills: list[SkillSpec] = field(default_factory=list)                    # domain skills (markdown files)
 
 
 @dataclass
@@ -93,6 +129,9 @@ class DemoSpec:
     script: dict[str, Any]
     manual_steps: list[dict[str, Any]]
     raw: dict[str, Any]
+    live_apps: list[dict[str, Any]] = field(default_factory=list)   # every Live App (live_apps[] or [live_app])
+    chats: list[dict[str, Any]] = field(default_factory=list)       # every answered chat (chats[] or [chat])
+    agents: list[dict[str, Any]] = field(default_factory=list)      # every agent (agents[] or [agent])
 
     # ---- derived paths ----
     @property
@@ -183,6 +222,22 @@ def load_spec(name_or_path: str | Path) -> DemoSpec:
 
     w_raw = raw.get("wisdom") or {}
     conn = w_raw.get("connection") or {}
+    federated: list[FederatedSource] = []
+    for f in w_raw.get("federated_sources") or []:
+        if not isinstance(f, dict) or not f.get("connection") or not f.get("database"):
+            raise SpecError(f"wisdom.federated_sources entries need connection and database: {f!r}")
+        federated.append(FederatedSource(
+            connection=str(f["connection"]), database=str(f["database"]),
+            tables=[str(t) for t in f.get("tables") or []], dialect=str(f.get("dialect") or "snowflake"),
+            schema=(None if f.get("schema") is None else str(f["schema"])), description=f.get("description"),
+        ))
+    skills: list[SkillSpec] = []
+    for sk in w_raw.get("skills") or []:
+        if isinstance(sk, str):
+            sk = {"file": sk}
+        if not isinstance(sk, dict) or not sk.get("file"):
+            raise SpecError(f"wisdom.skills entries need a file: {sk!r}")
+        skills.append(SkillSpec(file=str(sk["file"]), availability=[str(a).upper() for a in (sk.get("availability") or ["CHAT", "COPILOT", "AGENTS"])]))
     wisdom = WisdomSpec(
         deployment=w_raw.get("deployment", "proddemo"),
         workspace_id=w_raw.get("workspace_id"),
@@ -198,8 +253,35 @@ def load_spec(name_or_path: str | Path) -> DemoSpec:
         eval=dict(w_raw.get("eval") or {}),
         context_mode=str(w_raw.get("context_mode") or "extractor"),
         extraction=dict(w_raw.get("extraction") or {}),
+        existing_domain=bool(w_raw.get("existing_domain", False)),
+        domain_id=w_raw.get("domain_id"),
+        instructions_mode=str(w_raw.get("instructions_mode") or ("skip" if w_raw.get("existing_domain") else "replace")),
+        connection_create=bool(conn.get("create", True)) if isinstance(conn, dict) else True,
+        federated_sources=federated,
+        skills=skills,
     )
 
+    def _many(plural: str, singular: str) -> list[dict[str, Any]]:
+        """`live_apps[]` (etc.) when given, else the legacy single `live_app` mapping as a one-item list.
+        Every entry gets a `key` (its own, else a slug of its name, else its index) used in .state.json."""
+        items = raw.get(plural)
+        if items is None:
+            one = raw.get(singular)
+            items = [one] if one else []
+        out = []
+        for i, it in enumerate(items):
+            if not isinstance(it, dict):
+                raise SpecError(f"{plural}[{i}] must be a mapping")
+            it = dict(it)
+            default = re.sub(r"[^a-z0-9]+", "_", str(it.get("name") or "").lower()).strip("_")[:40]
+            it.setdefault("key", default or ("followup" if (singular == "chat" and i == 0) else f"{singular}{i + 1}"))
+            out.append(it)
+        keys = [it["key"] for it in out]
+        if len(keys) != len(set(keys)):
+            raise SpecError(f"{plural}[] keys must be unique: {keys}")
+        return out
+
+    live_apps, chats, agents = _many("live_apps", "live_app"), _many("chats", "chat"), _many("agents", "agent")
     return DemoSpec(
         name=str(raw.get("name") or demo_dir.name),
         title=str(raw.get("title") or raw.get("name") or demo_dir.name),
@@ -215,13 +297,14 @@ def load_spec(name_or_path: str | Path) -> DemoSpec:
         control_points=cps,
         questions=dict(raw.get("questions") or {}),
         documents=list(raw.get("documents") or []),
-        live_app=dict(raw.get("live_app") or {}),
-        chat=dict(raw.get("chat") or {}),
-        agent=dict(raw.get("agent") or {}),
+        live_app=dict(live_apps[0] if live_apps else {}),
+        chat=dict(chats[0] if chats else {}),
+        agent=dict(agents[0] if agents else {}),
         wisdom=wisdom,
         script=dict(raw.get("script") or {}),
         manual_steps=list(raw.get("manual_steps") or []),
         raw=raw,
+        live_apps=live_apps, chats=chats, agents=agents,
     )
 
 
@@ -249,6 +332,20 @@ def validate_spec(spec: DemoSpec, *, stage: str = "all") -> list[str]:
         problems.append("seed must be a non-zero integer")
     if spec.wisdom.context_mode not in ("extractor", "direct"):
         problems.append("wisdom.context_mode must be 'extractor' (default) or 'direct'")
+    if spec.wisdom.instructions_mode not in ("replace", "append", "skip"):
+        problems.append("wisdom.instructions_mode must be replace, append or skip")
+    if spec.wisdom.existing_domain:
+        if not str(spec.wisdom.domain_id or "").startswith("ET_DOMAIN_"):
+            problems.append("wisdom.existing_domain needs wisdom.domain_id (ET_DOMAIN_...) of the domain to extend")
+        if not spec.wisdom.workspace_id:
+            problems.append("wisdom.existing_domain needs an explicit wisdom.workspace_id")
+        if spec.wisdom.instructions_mode == "replace":
+            problems.append("wisdom.instructions_mode=replace would overwrite the shared domain's instructions; use append or skip")
+    for f in spec.wisdom.federated_sources:
+        if not f.tables:
+            problems.append(f"wisdom.federated_sources[{f.connection}] lists no tables")
+        if f.connection.strip().lower() == (spec.wisdom.connection_name or "").strip().lower():
+            problems.append(f"wisdom.federated_sources[{f.connection}] is the demo's own connection — federated sources are OTHER connections")
     try:
         if int(spec.wisdom.eval.get("run_count") or 3) < 3:
             problems.append("wisdom.eval.run_count must be at least 3 (every eval set runs a minimum of 3 times)")
@@ -268,6 +365,21 @@ def validate_spec(spec: DemoSpec, *, stage: str = "all") -> list[str]:
         vmissing = [v for v in views if v not in spec.snowflake.views]
         if vmissing:
             problems.append(f"views in DDL but not in snowflake.views: {', '.join(vmissing)}")
+    for sk in spec.wisdom.skills:
+        p = spec.dir / sk.file
+        if not p.is_file():
+            problems.append(f"skill file missing: {sk.file}")
+        else:
+            fm = skill_frontmatter(p.read_text())
+            if not fm.get("name") or not fm.get("description"):
+                problems.append(f"skill {sk.file} needs 'name:' and 'description:' frontmatter")
+            elif fm["name"] != sk.name:
+                problems.append(f"skill {sk.file}: frontmatter name '{fm['name']}' must equal the file stem '{sk.name}'")
+            elif not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", fm["name"]):
+                problems.append(f"skill {sk.file}: name must be lowercase and hyphenated")
+        bad = [a for a in sk.availability if a not in ("CHAT", "COPILOT", "AGENTS")]
+        if bad:
+            problems.append(f"skill {sk.file}: availability must be CHAT, COPILOT or AGENTS (got {bad})")
     if stage == "design":
         return problems
 
@@ -291,8 +403,25 @@ def validate_spec(spec: DemoSpec, *, stage: str = "all") -> list[str]:
         p = spec.file(d.get("spec"))
         if p is None or not p.is_file():
             problems.append(f"document spec missing: {d.get('spec')}")
-    for key in ("live_app", "agent"):
-        prompt = getattr(spec, key).get("prompt")
-        if prompt and not (spec.dir / prompt).is_file():
-            problems.append(f"{key} prompt missing: {prompt}")
+    for label, entries in (("live_apps", spec.live_apps), ("agents", spec.agents)):
+        for it in entries:
+            prompt = it.get("prompt")
+            if prompt and not (spec.dir / prompt).is_file():
+                problems.append(f"{label}[{it.get('key')}] prompt missing: {prompt}")
     return problems
+
+
+def skill_frontmatter(markdown: str) -> dict[str, str]:
+    """`name:` and `description:` from a skill file's YAML frontmatter (quotes stripped)."""
+    m = re.match(r"\s*---\n(.*?)\n---", markdown, re.S)
+    if not m:
+        return {}
+    out: dict[str, str] = {}
+    try:
+        data = yaml.safe_load(m.group(1)) or {}
+    except yaml.YAMLError:
+        return {}
+    for k in ("name", "description"):
+        if data.get(k) is not None:
+            out[k] = str(data[k]).strip()
+    return out
